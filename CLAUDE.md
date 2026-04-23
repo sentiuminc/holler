@@ -20,7 +20,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
   - `checkpoints/katie-v6/` — bf16, 2.3GB disk (source for quantization)
   - `checkpoints/katie-v6-4bit/` — **4-bit affine (the pick)**, 960MB disk, 1.6GB Metal RAM, 64-80ms streaming TTFA
 - **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues: short utterances like "Okay." generate silence. Can re-quantize to 4-bit anytime. Not production-grade.
-- **Voices designed:** 2/30 (Katie, Joe). 28 more needed.
+- **Voices designed:** 3/30 (Katie, Joe, Joseph). 27 more needed.
 - **Inference runtime:** Python mlx-audio. Tested, clean audio, no artifacts. Streaming TTFA 64-80ms. See Inference Architecture section below.
 - **Swift evaluation:** soniqo/speech-swift tested 2026-04-23. Rejected — audio pops, end cutoff, streaming crash after ~13 calls. Weight formats are identical to mlx-audio (verified key-by-key). Reference code is at `speech-swift/` for future use.
 
@@ -48,10 +48,14 @@ holler/
 │   │   ├── ref.wav        — 10s reference audio
 │   │   ├── cartesia_original.wav — original source
 │   │   └── training-data/ — 385 clips + train.jsonl
-│   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
-│       ├── ref.wav
-│       ├── candidates/    — 28 voice design candidates + index.txt
-│       └── training-data/ — 385 clips + train.jsonl
+│   ├── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
+│   │   ├── ref.wav
+│   │   ├── candidates/    — 28 voice design candidates + index.txt
+│   │   └── training-data/ — 385 clips + train.jsonl
+│   ├── joseph/            — Male voice (VoiceDesign-sourced, slot 3002)
+│   │   ├── ref.wav        — deep bass, authoritative, old-school patriarch
+│   │   └── candidates/    — 12 voice design candidates
+│   └── _unsorted/         — Saved but unchosen voice experiments
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
 │   ├── katie-v6-8bit/     — 1.2GB 8-bit affine (q_group_size=64)
@@ -175,6 +179,7 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - Training data: ~385 clips per voice, voice-cloned from a reference through Qwen3-TTS-1.7B-Base. 24kHz mono WAV with 1s trailing silence.
 - Multi-voice: same recipe, but JSONL has per-sample `voice_name` field, and training script tracks embeddings per voice. See `training/sft_12hz_multivoice.py`.
 - Voice name in v6 config is `katie` at slot 3000 (nested under `talker_config.spk_id`).
+- Joseph is slot 3002. VoiceDesign instruct: "Weathered, authoritative male voice... Late fifties, deep bass register. Old-school Soviet toughness." Not yet trained.
 
 ## GPU Training
 

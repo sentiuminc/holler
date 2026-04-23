@@ -56,6 +56,11 @@
 
 ---
 
-**Slot assignments:** Katie is slot 3000. These 30 voices will be assigned slots 3000-3029 during training. Katie may be renamed to one of these if she fits a character.
+**Slot assignments:**
+- Katie — slot 3000 (Cartesia-sourced, trained, production-ready)
+- Joe — slot 3001 (VoiceDesign-sourced, trained, quality issues in multi-voice)
+- Joseph — slot 3002 (VoiceDesign-sourced, designed, not yet trained) — deep bass, authoritative patriarch
+
+The remaining 27 voices will be assigned slots 3003-3029 during training. Katie may be renamed to one of these if she fits a character.
 
 **Design process:** Use `Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` to generate reference audio for each voice from a character description. Multiple rounds of candidates per voice, pick the best. Clone 385 training clips per voice via 1.7B-Base-8bit locally on Mac.
