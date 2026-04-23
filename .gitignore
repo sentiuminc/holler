@@ -1,0 +1,20 @@
+# Large files — not in git
+checkpoints/
+voices/*/training-data/audio/
+samples/
+*.wav
+*.mp3
+*.safetensors
+*.bin
+*.pt
+
+# Keep reference wavs and jsonl manifests tracked via git-lfs or explicit includes
+!voices/*/ref.wav
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+
+# OS
+.DS_Store

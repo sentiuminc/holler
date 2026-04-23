@@ -1,0 +1,124 @@
+Joe voice candidates — generated 2026-04-21 19:30
+Model: mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit
+Target text: Good morning. I've reviewed your schedule for today, and everything is in order. Your first meeting begins in forty-five minutes. Would you like me to prepare the car?
+
+================================================================================
+
+joe01_measured_baritone  (9.4s)
+  → joe01_measured_baritone.wav
+  instruct: A calm, measured American male voice in his late thirties. Warm baritone register, clear articulation, unhurried pace. Speaks with quiet confidence and understated authority, like a trusted chief of staff. No vocal fry. Even tonal flow.
+
+joe02_crisp_mid_register  (8.5s)
+  → joe02_crisp_mid_register.wav
+  instruct: Mid-register American male voice, early thirties, crisp and articulate. Polished, precise diction. Professional, slightly formal, but approachable. Clean breath control, steady tempo. No nasal quality.
+
+joe03_warm_advisor  (12.7s)
+  → joe03_warm_advisor.wav
+  instruct: Warm, grounded American male voice in his forties. Rich lower midrange, relaxed cadence, thoughtful pauses between phrases. Sounds like a seasoned advisor — wise, reassuring, never patronizing. Slight smile in the voice.
+
+joe04_refined_butler  (10.2s)
+  → joe04_refined_butler.wav
+  instruct: Refined American male voice, late thirties. Slightly lower register, polished enunciation, poised delivery. Subtly formal, like a discreet personal assistant. Controlled, elegant pacing. Neutral American accent, no regional flavor.
+
+joe05_intelligent_dry  (10.8s)
+  → joe05_intelligent_dry.wav
+  instruct: Intelligent, dry American male voice in his late thirties to early forties. Medium register, smooth, unflustered. Minimalist — no theatrical inflection. Conveys competence and mild wit. Like a senior engineer who never raises his voice.
+
+joe06_soft_confident  (9.4s)
+  → joe06_soft_confident.wav
+  instruct: Soft-spoken yet confident American male voice in his thirties. Medium-low register, warm timbre, gentle delivery. No breathiness. Conveys trust and quiet intelligence. Moderate tempo, natural phrasing.
+
+joe07_classic_narrator  (9.3s)
+  → joe07_classic_narrator.wav
+  instruct: Classic American male narrator voice, forties. Resonant lower midrange, crisp articulation, steady and deliberate pacing. Rich but not dramatic. The kind of voice you'd hear on a well-produced documentary. Balanced and engaging.
+
+joe08_modern_assistant  (9.8s)
+  → joe08_modern_assistant.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, neutral emotion. Feels like a smart, reliable colleague.
+
+================================================================================
+joe08 variations — generated 2026-04-21 19:33
+Iterating on joe08_modern_assistant (selected as direction). Faster + more animated.
+================================================================================
+
+joe08b_quick_animated  (7.5s)
+  → joe08b_quick_animated.wav
+  instruct: Modern American male assistant voice, early thirties. Clean midrange, natural contemporary American accent, friendly and professional. Quicker speech tempo — brisk but never rushed. Lively inflection and natural expressiveness, with clear consonants and engaged energy. Feels like a smart colleague who's on top of the day.
+
+joe08c_faster_warm  (7.9s)
+  → joe08c_faster_warm.wav
+  instruct: Modern American male assistant voice, early thirties. Clean midrange, warm contemporary American accent, upbeat and confident. Faster pace, with natural rhythmic variation and subtle melodic inflection. Feels engaged and present — warm, capable, never monotone.
+
+joe08d_bright_energetic  (8.1s)
+  → joe08d_bright_energetic.wav
+  instruct: Modern American male assistant voice, mid-thirties. Clean midrange, bright contemporary American accent. Energetic delivery with lively pitch contour and animated phrasing. Crisp consonants, brisk tempo. Conveys sharp intelligence and genuine enthusiasm while staying professional.
+
+joe08e_punchy_expressive  (8.8s)
+  → joe08e_punchy_expressive.wav
+  instruct: Modern American male assistant voice, early thirties. Clean midrange, contemporary American accent. Punchy, expressive delivery — dynamic stress on key words, natural ups and downs in intonation. Fast but clearly articulated. Feels like a trusted, sharp-witted executive assistant.
+
+joe08f_snappy_friendly  (7.7s)
+  → joe08f_snappy_friendly.wav
+  instruct: Modern American male assistant voice, early thirties. Clean midrange, friendly contemporary American accent. Snappy, efficient tempo with natural warmth. Playful melodic variation without being theatrical. Crisp, engaged, and quick-witted — like a brilliant coworker who moves at speed.
+
+joe08g_lively_pro  (7.3s)
+  → joe08g_lively_pro.wav
+  instruct: Modern American male assistant voice, mid-thirties. Clean midrange, polished contemporary American accent. Lively and professional — moderate-to-fast pace with expressive intonation, clear articulation, and a smile in the voice. Conveys competence plus genuine personality. Never flat, never overdone.
+
+================================================================================
+joe08 subtle variants — 2026-04-21 19:36
+Tiny nudges on original joe08 (previous b-g were too expressive).
+================================================================================
+
+joe08h_subtle_nudge  (7.4s)
+  → joe08h_subtle_nudge.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08i_slightly_quicker  (9.7s)
+  → joe08i_slightly_quicker.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Moderate-to-brisk pace — efficient without sounding rushed. Clear consonants, neutral emotion with a trace of warmth. Feels like a smart, reliable colleague.
+
+joe08j_natural_flow  (9.4s)
+  → joe08j_natural_flow.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational flow — subtle rise and fall in pitch on longer phrases. Neutral emotion. Feels like a smart, reliable colleague.
+
+joe08k_touch_more_alive  (9.8s)
+  → joe08k_touch_more_alive.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants. Calm and composed, but with a touch of natural engagement in the voice — not flat, not theatrical. Feels like a smart, reliable colleague who's paying attention.
+
+================================================================================
+joe08h expansion — 2026-04-21 19:39
+joe08h selected as direction. Reruns (h1-h4) + tight siblings (ha-hd).
+================================================================================
+
+joe08h1_rerun  (8.0s)
+  → joe08h1_rerun.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08h2_rerun  (8.6s)
+  → joe08h2_rerun.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08h3_rerun  (8.9s)
+  → joe08h3_rerun.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08h4_rerun  (8.2s)
+  → joe08h4_rerun.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08ha_warm_nudge  (8.6s)
+  → joe08ha_warm_nudge.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean warm midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle melodic inflection. Feels like a smart, reliable colleague who's engaged and present.
+
+joe08hb_grounded_nudge  (7.8s)
+  → joe08hb_grounded_nudge.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange with a grounded low edge, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly quicker than deliberate, with subtle melodic inflection. A smart, reliable colleague who's present and paying attention.
+
+joe08hc_smooth_nudge  (8.2s)
+  → joe08hc_smooth_nudge.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Smooth clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, crisp consonants, natural conversational rhythm — slightly faster pace, with subtle melodic inflection. Feels like a smart, reliable colleague.
+
+joe08hd_attentive_nudge  (7.5s)
+  → joe08hd_attentive_nudge.wav
+  instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural contemporary American accent, friendly-but-professional tone. Concise delivery, clear consonants, natural conversational rhythm — slightly faster pace than deliberate, with subtle natural inflection. Attentive and composed — feels like a smart, reliable colleague.

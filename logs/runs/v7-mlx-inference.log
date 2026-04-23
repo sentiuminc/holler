@@ -1,0 +1,32 @@
+You are using a model of type `qwen3_tts` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+The tokenizer you are loading from '/Users/nagy/Downloads/ivi-v7-katie-joe/checkpoint-epoch-1' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Loading checkpoint: /Users/nagy/Downloads/ivi-v7-katie-joe/checkpoint-epoch-1
+  Initialized encoder codebooks
+Loaded speech tokenizer from /Users/nagy/Downloads/ivi-v7-katie-joe/checkpoint-epoch-1/speech_tokenizer
+Loaded in 4.6s
+
+=== katie ===
+  test_01: 2.2s  peak=0.895  gen 1.6s  → test_01.wav
+  test_02: 3.3s  peak=0.826  gen 2.0s  → test_02.wav
+  test_03: 3.6s  peak=0.714  gen 2.1s  → test_03.wav
+  test_04: 2.9s  peak=0.905  gen 1.8s  → test_04.wav
+  test_05: 3.0s  peak=0.940  gen 1.8s  → test_05.wav
+  test_06: 2.6s  peak=0.611  gen 1.6s  → test_06.wav
+  test_07: 2.7s  peak=0.866  gen 1.6s  → test_07.wav
+  test_08: 2.6s  peak=0.806  gen 1.6s  → test_08.wav
+  test_09: 3.4s  peak=0.822  gen 2.1s  → test_09.wav
+  test_10: 3.3s  peak=0.882  gen 2.0s  → test_10.wav
+
+=== joe ===
+  test_01: 1.8s  peak=0.491  gen 1.2s  → test_01.wav
+  test_02: 2.7s  peak=0.685  gen 1.7s  → test_02.wav
+  test_03: 3.5s  peak=0.777  gen 2.1s  → test_03.wav
+  test_04: 3.0s  peak=0.998  gen 1.8s  → test_04.wav
+  test_05: 2.2s  peak=1.000  gen 1.4s ⚠ CLIP → test_05.wav
+  test_06: 2.8s  peak=0.618  gen 1.7s  → test_06.wav
+  test_07: 2.6s  peak=0.637  gen 1.6s  → test_07.wav
+  test_08: 2.4s  peak=0.956  gen 1.5s  → test_08.wav
+  test_09: 3.2s  peak=0.881  gen 1.9s  → test_09.wav
+  test_10: 2.6s  peak=0.878  gen 1.6s  → test_10.wav
+
+Done. Samples in /Users/nagy/Downloads/ivi-v7-katie-joe/samples-mlx

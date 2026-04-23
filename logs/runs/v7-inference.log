@@ -1,0 +1,55 @@
+/bin/sh: 1: sox: not found
+SoX could not be found!
+
+    If you do not have SoX, proceed here:
+     - - - http://sox.sourceforge.net/ - - -
+
+    If you do (or think that you should) have SoX, double-check your
+    path variables.
+    
+You are attempting to use Flash Attention 2 without specifying a torch dtype. This might lead to unexpected behaviour
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.
+Loading checkpoint: /workspace/output/checkpoint-epoch-1
+Supported speakers: ['joe', 'katie']
+  [katie] test_01: What time is it in Tokyo right now?
+  [katie] test_02: The quick brown fox jumps over the lazy dog.
+  [katie] test_03: Before we begin, let me make sure I have this right.
+  [katie] test_04: I think we should grab dinner somewhere downtown.
+  [katie] test_05: There's a package waiting for you at the front desk.
+  [katie] test_06: Would you prefer coffee or tea with your breakfast?
+  [katie] test_07: The train arrives at the station in eight minutes.
+  [katie] test_08: Don't worry, I'll handle everything from here.
+  [katie] test_09: Sorry to interrupt, but I have an urgent question.
+  [katie] test_10: It's been a long day. Let's call it a night.
+  [joe] test_01: What time is it in Tokyo right now?
+  [joe] test_02: The quick brown fox jumps over the lazy dog.
+  [joe] test_03: Before we begin, let me make sure I have this right.
+  [joe] test_04: I think we should grab dinner somewhere downtown.
+  [joe] test_05: There's a package waiting for you at the front desk.
+  [joe] test_06: Would you prefer coffee or tea with your breakfast?
+  [joe] test_07: The train arrives at the station in eight minutes.
+  [joe] test_08: Don't worry, I'll handle everything from here.
+  [joe] test_09: Sorry to interrupt, but I have an urgent question.
+  [joe] test_10: It's been a long day. Let's call it a night.
+
+Done. 20 clips generated, 0 suspect EOS broken.
+Manifest: /workspace/inference_samples/manifest.jsonl

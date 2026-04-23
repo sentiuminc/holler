@@ -1,0 +1,123 @@
+Loading mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit...
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 12 files:   8%|▊         | 1/12 [00:00<00:03,  3.33it/s]Fetching 12 files:  25%|██▌       | 3/12 [00:00<00:01,  5.18it/s]Fetching 12 files:  33%|███▎      | 4/12 [04:20<12:00, 90.00s/it]Fetching 12 files: 100%|██████████| 12/12 [04:20<00:00, 21.70s/it]
+You are using a model of type `qwen3_tts` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+The tokenizer you are loading from '/Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+  Initialized encoder codebooks
+Loaded speech tokenizer from /Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee/speech_tokenizer
+Loaded in 268.7s
+
+→ joe01_measured_baritone
+   instruct: A calm, measured American male voice in his late thirties. Warm baritone register, clear a...
+   ✓ 9.4s audio, gen 6.5s → /Users/nagy/Downloads/joe-candidates/joe01_measured_baritone.wav
+
+→ joe02_crisp_mid_register
+   instruct: Mid-register American male voice, early thirties, crisp and articulate. Polished, precise ...
+   ✓ 8.5s audio, gen 6.2s → /Users/nagy/Downloads/joe-candidates/joe02_crisp_mid_register.wav
+
+→ joe03_warm_advisor
+   instruct: Warm, grounded American male voice in his forties. Rich lower midrange, relaxed cadence, t...
+   ✓ 12.7s audio, gen 11.7s → /Users/nagy/Downloads/joe-candidates/joe03_warm_advisor.wav
+
+→ joe04_refined_butler
+   instruct: Refined American male voice, late thirties. Slightly lower register, polished enunciation,...
+   ✓ 10.2s audio, gen 7.4s → /Users/nagy/Downloads/joe-candidates/joe04_refined_butler.wav
+
+→ joe05_intelligent_dry
+   instruct: Intelligent, dry American male voice in his late thirties to early forties. Medium registe...
+   ✓ 10.8s audio, gen 7.6s → /Users/nagy/Downloads/joe-candidates/joe05_intelligent_dry.wav
+
+→ joe06_soft_confident
+   instruct: Soft-spoken yet confident American male voice in his thirties. Medium-low register, warm t...
+   ✓ 9.4s audio, gen 5.9s → /Users/nagy/Downloads/joe-candidates/joe06_soft_confident.wav
+
+→ joe07_classic_narrator
+   instruct: Classic American male narrator voice, forties. Resonant lower midrange, crisp articulation...
+   ✓ 9.3s audio, gen 5.0s → /Users/nagy/Downloads/joe-candidates/joe07_classic_narrator.wav
+
+→ joe08_modern_assistant
+   instruct: Modern American male assistant voice, early to mid thirties. Clean midrange, natural conte...
+   ✓ 9.8s audio, gen 5.2s → /Users/nagy/Downloads/joe-candidates/joe08_modern_assistant.wav
+
+
+Wrote index to /Users/nagy/Downloads/joe-candidates/index.txt
+Done — 8 candidates in /Users/nagy/Downloads/joe-candidates
+Loading mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit...
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 207126.12it/s]
+You are using a model of type `qwen3_tts` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+The tokenizer you are loading from '/Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+  Initialized encoder codebooks
+Loaded speech tokenizer from /Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee/speech_tokenizer
+Loaded in 8.0s
+
+→ joe08b_quick_animated
+   instruct: Modern American male assistant voice, early thirties. Clean midrange, natural contemporary...
+   ✓ 7.5s audio, gen 4.5s → /Users/nagy/Downloads/joe-candidates/joe08b_quick_animated.wav
+
+→ joe08c_faster_warm
+   instruct: Modern American male assistant voice, early thirties. Clean midrange, warm contemporary Am...
+   ✓ 7.9s audio, gen 4.4s → /Users/nagy/Downloads/joe-candidates/joe08c_faster_warm.wav
+
+→ joe08d_bright_energetic
+   instruct: Modern American male assistant voice, mid-thirties. Clean midrange, bright contemporary Am...
+   ✓ 8.1s audio, gen 4.5s → /Users/nagy/Downloads/joe-candidates/joe08d_bright_energetic.wav
+
+→ joe08e_punchy_expressive
+   instruct: Modern American male assistant voice, early thirties. Clean midrange, contemporary America...
+   ✓ 8.8s audio, gen 4.9s → /Users/nagy/Downloads/joe-candidates/joe08e_punchy_expressive.wav
+
+→ joe08f_snappy_friendly
+   instruct: Modern American male assistant voice, early thirties. Clean midrange, friendly contemporar...
+   ✓ 7.7s audio, gen 4.3s → /Users/nagy/Downloads/joe-candidates/joe08f_snappy_friendly.wav
+
+→ joe08g_lively_pro
+   instruct: Modern American male assistant voice, mid-thirties. Clean midrange, polished contemporary ...
+   ✓ 7.3s audio, gen 3.9s → /Users/nagy/Downloads/joe-candidates/joe08g_lively_pro.wav
+
+
+Appended to /Users/nagy/Downloads/joe-candidates/index.txt
+Done — 6 variants in /Users/nagy/Downloads/joe-candidates
+Loading mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit...
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 35848.75it/s]
+You are using a model of type `qwen3_tts` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+The tokenizer you are loading from '/Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+  Initialized encoder codebooks
+Loaded speech tokenizer from /Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee/speech_tokenizer
+Loaded in 7.2s
+
+→ joe08h_subtle_nudge
+   ✓ 7.4s audio, gen 4.5s → joe08h_subtle_nudge.wav
+→ joe08i_slightly_quicker
+   ✓ 9.7s audio, gen 5.5s → joe08i_slightly_quicker.wav
+→ joe08j_natural_flow
+   ✓ 9.4s audio, gen 5.2s → joe08j_natural_flow.wav
+→ joe08k_touch_more_alive
+   ✓ 9.8s audio, gen 5.3s → joe08k_touch_more_alive.wav
+
+Done — 4 subtle variants
+Loading mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit...
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 200524.49it/s]
+You are using a model of type `qwen3_tts` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+The tokenizer you are loading from '/Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+  Initialized encoder codebooks
+Loaded speech tokenizer from /Users/nagy/.cache/huggingface/hub/models--mlx-community--Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit/snapshots/f90d617701d9f7f4ca499291e0b57f2b3c2fd2ee/speech_tokenizer
+Loaded in 6.9s
+
+→ joe08h1_rerun
+   ✓ 8.0s audio, gen 4.3s → joe08h1_rerun.wav
+→ joe08h2_rerun
+   ✓ 8.6s audio, gen 4.7s → joe08h2_rerun.wav
+→ joe08h3_rerun
+   ✓ 8.9s audio, gen 4.8s → joe08h3_rerun.wav
+→ joe08h4_rerun
+   ✓ 8.2s audio, gen 4.5s → joe08h4_rerun.wav
+→ joe08ha_warm_nudge
+   ✓ 8.6s audio, gen 4.4s → joe08ha_warm_nudge.wav
+→ joe08hb_grounded_nudge
+   ✓ 7.8s audio, gen 4.3s → joe08hb_grounded_nudge.wav
+→ joe08hc_smooth_nudge
+   ✓ 8.2s audio, gen 4.3s → joe08hc_smooth_nudge.wav
+→ joe08hd_attentive_nudge
+   ✓ 7.5s audio, gen 4.1s → joe08hd_attentive_nudge.wav
+
+Done — 8 joe08h expansions
