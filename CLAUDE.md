@@ -2,7 +2,7 @@
 
 Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
-**What this is:** A fine-tuned Qwen3-TTS-12Hz-0.6B model with 30 high-quality American English voices, optimized for local inference on Apple Silicon via mlx-audio. ~80ms TTFA streaming, ~2GB RAM at 4-bit. The fastest high-quality local TTS available on Mac.
+**What this is:** A fine-tuned Qwen3-TTS-12Hz-0.6B model with 30 high-quality American English voices, optimized for local inference on Apple Silicon via mlx-audio. ~139ms TTFA streaming, ~1.7GB RAM at 6-bit. The fastest high-quality local TTS available on Mac.
 
 **What this is not:** A new TTS architecture. This is a fine-tune of Alibaba's [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache 2.0) with better English voices and a fully open training pipeline. All credit for the base model goes to the Qwen team at Alibaba. Our contribution is the voices, the Mac-focused inference setup, and the open training pipeline.
 
@@ -50,10 +50,14 @@ holler/
 │   │   ├── ref.wav        — 10s reference audio
 │   │   ├── cartesia_original.wav — original source
 │   │   └── training-data/ — 385 clips + train.jsonl
+│   │       ├── audio/           — enhanced clips (ClearVoice→DeepFilter→E)
+│   │       └── audio-original/  — pre-enhancement backups
 │   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
 │       ├── ref.wav
 │       ├── candidates/    — 28 voice design candidates + index.txt
 │       └── training-data/ — 385 clips + train.jsonl
+│           ├── audio/           — enhanced clips
+│           └── audio-original/  — pre-enhancement backups
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
 │   ├── katie-v6-4bit/     — 960MB 4-bit affine (previous pick)
@@ -195,7 +199,7 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 
 **Live demo:** `inference/live_demo.py` — HTTP server on port 8099, type text in browser, audio plays from Mac speakers.
 
-**Python venv:** `requirements.txt` has dependencies. Create with `python3 -m venv .venv && pip install -r requirements.txt`.
+**Python venv:** `.venv` exists (Python 3.13). Has mlx-audio for inference, plus clearvoice/deepfilternet/noisereduce for audio enhancement. torch 2.6 + torchaudio 2.6 (pinned for DeepFilterNet compatibility).
 
 ## Known: 220ms Leading Silence
 
@@ -207,6 +211,27 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - Trim leading silence from training data before next training run
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
+
+## Training Data Enhancement (2026-04-24)
+
+All training clips (Katie 385 + Joe 385 = 770) processed through a 3-stage enhancement pipeline. Originals backed up at `voices/*/training-data/audio-original/`.
+
+**Pipeline: ClearVoice → DeepFilterNet3 → Recipe E**
+
+1. **ClearVoice MossFormer2_SE_48K** — Alibaba's 50M-param speech enhancer. Uses spectral masking (NOT vocoding — preserves voice identity). Outputs at 48kHz, resample back to 24kHz.
+2. **DeepFilterNet3** — 2.1M-param neural denoiser. Fine-grained noise removal in 2-6kHz range (ear fatigue zone). Resample 24k→48k→24k.
+3. **Recipe E** — 80Hz high-pass filter (scipy butter order 4) + 30% stationary spectral denoise (noisereduce).
+4. **Peak matching** — scale output so peak matches original, preventing volume change.
+
+**Why this order:** ClearVoice does broad spectral cleanup (understands speech structure), DeepFilterNet does fine-grained residual noise, Recipe E catches low-frequency rumble. Each pass is complementary. Reversed order (DF→CV→E) sounds worse.
+
+**What was tested and rejected:** Resemble Enhance (needs deepspeed, destroys speaker similarity), VoiceFixer (checkpoint corrupt, uses vocoder), AudioSR (ancient deps), AP-BWE (manual weight download), spectral denoise alone at 80-100% (hollows voice), DSP with normalization+trim+de-essing (too much).
+
+**Performance:** ~0.5-0.7s/clip on M1 Pro. All 770 clips in ~8 minutes.
+
+**Result:** Cleaner audio, reduced 2-6kHz noise that causes ear fatigue on AirPods, voice character fully preserved. "Light years better than Cartesia" on same sentences.
+
+**Dependencies:** holler `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, clearvoice, deepfilternet, noisereduce, scipy). Note: torchaudio must be 2.6 (not newer) for DeepFilterNet compatibility.
 
 ## Key Technical Details
 
@@ -274,7 +299,8 @@ No Vast.ai instances exist. To train, rent a fresh A100 SXM4 40GB (~$0.50/hr on 
 
 1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE. `inference/server.py` + `sidecar/tts-sidecar-fast.py`. RTF 0.38, TTFA 139ms (6-bit).
 2. ~~**Try alternative quantization**~~ — ✅ DONE (2026-04-24). Tested 8 variants: affine 3/4/6/8-bit, mxfp4, mxfp8, nvfp4, multiple group sizes. 6-bit affine g64 wins on voice quality. See Quantization section.
-3. **Retrain Katie with better prosody data** — current 385 clips are synthetic (cloned through 1.7B). Real human recordings or higher-quality TTS synthesis for training data would raise the quality ceiling. 6-bit already sounds great with synthetic data — real data would be a step change.
+3. **Enhance training audio** — IN PROGRESS (2026-04-24). ClearVoice→DeepFilter→E pipeline applied to all 770 clips (Katie + Joe). Audio quality enhanced. Still need manual curation: listen to all clips, remove bad prosody/wonky ones (~30% estimated). Automated filters can't catch prosody issues — only ears can.
+3b. **Retrain Katie+Joe with curated+enhanced data** — blocked on manual curation (step 3).
 4. **Solve multi-voice quality** — v7 Katie+Joe has issues (short utterances generate silence). Root cause still unknown.
 5. **Design and train more voices** — 28 more needed. Names and characters in `voices/VOICES.md`.
 6. **Standardize GPU runbook** — from-scratch instance setup → training → quantization → 6-bit conversion
