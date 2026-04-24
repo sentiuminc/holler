@@ -12,17 +12,18 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Origin:** Started as the voice component of [ivi](https://ivi.computer), a macOS notch AI assistant by Sentium. We open-sourced it because Qwen3-TTS is SOTA for local inference but ships with only 2 mediocre English voices — and nothing else fills that gap.
 
-## Current State (2026-04-23)
+## Current State (2026-04-24)
 
 - **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only on upstream `sft_12hz.py`.
-- **Single-voice (Katie, v6):** Clean. Production-ready. Checkpoint at `checkpoints/katie-v6/` (bf16 source) and `checkpoints/katie-v6-4bit/` (production pick).
-- **Quantization:** 4-bit affine is the pick. 8-bit deleted (redundant).
-  - `checkpoints/katie-v6/` — bf16, 2.3GB disk (source for quantization)
-  - `checkpoints/katie-v6-4bit/` — **4-bit affine (the pick)**, 960MB disk, 1.6GB Metal RAM, 64-80ms streaming TTFA
-- **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues: short utterances like "Okay." generate silence. Can re-quantize to 4-bit anytime. Not production-grade.
-- **Voices designed:** 3/30 (Katie, Joe, Joseph). 27 more needed.
-- **Inference runtime:** Python mlx-audio. Tested, clean audio, no artifacts. Streaming TTFA 64-80ms. See Inference Architecture section below.
-- **Swift evaluation:** soniqo/speech-swift tested 2026-04-23. Rejected — audio pops, end cutoff, streaming crash after ~13 calls. Weight formats are identical to mlx-audio (verified key-by-key). Reference code is at `speech-swift/` for future use.
+- **Single-voice (Katie, v6):** Clean. Production-ready.
+- **Quantization:** 6-bit affine g64 is the pick (2026-04-24). Noticeably better voice presence/dynamics than 4-bit. Full experiment results in Quantization section below.
+  - `checkpoints/katie-v6/` — bf16, 1.7GB disk (source for quantization)
+  - `checkpoints/quant-experiment/affine-6bit-g64/` — **6-bit affine (the pick)**, 1094MB disk, 1.7GB Metal RAM, RTF 0.38, TTFA 139ms
+  - `checkpoints/katie-v6-4bit/` — 4-bit affine (previous pick), 960MB disk — still works but less voice presence
+- **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues: short utterances like "Okay." generate silence. Not production-grade.
+- **Voices designed:** 2/30 (Katie, Joe). 28 more needed.
+- **Inference runtime:** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit. Accepts `--checkpoint` and `--port` flags.
+- **Swift evaluation:** soniqo/speech-swift tested 2026-04-23. Rejected — audio pops, end cutoff, streaming crash after ~13 calls. Reference code at `speech-swift/` for future use.
 
 ## Structure
 
@@ -32,11 +33,12 @@ holler/
 ├── .gitignore
 ├── training/              — Training scripts (single-voice + multi-voice SFT)
 ├── inference/             — MLX + PyTorch inference, TTFA benchmarks, live demo
+│   ├── server.py                   — Fast inference server (--checkpoint, --port flags)
+│   ├── experiment_quant_methods.py — Quantize + benchmark all quant variants
 │   ├── benchmark_katie_v6.py       — bf16 benchmark (10 texts, TTFA + peaks)
-│   ├── benchmark_quant_compare.py  — single-quant benchmark with psutil (deprecated measurement)
-│   ├── benchmark_quant_proper.py   — all-quant benchmark with MLX Metal memory (use this one)
-│   ├── benchmark_sentence_queue.py — sentence-queue benchmark simulating ivi pattern (use this one)
-│   ├── live_demo.py                — Web UI: type text, hear it spoken (~80ms TTFA)
+│   ├── benchmark_quant_proper.py   — all-quant benchmark with MLX Metal memory
+│   ├── benchmark_sentence_queue.py — sentence-queue benchmark simulating ivi pattern
+│   ├── live_demo.py                — Web UI: type text, hear it spoken
 │   ├── test_mlx_inference.py       — basic MLX test
 │   ├── test_mlx_streaming.py       — streaming TTFA test
 │   ├── test_mlx_multivoice.py      — multi-voice test
@@ -48,23 +50,24 @@ holler/
 │   │   ├── ref.wav        — 10s reference audio
 │   │   ├── cartesia_original.wav — original source
 │   │   └── training-data/ — 385 clips + train.jsonl
-│   ├── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
-│   │   ├── ref.wav
-│   │   ├── candidates/    — 28 voice design candidates + index.txt
-│   │   └── training-data/ — 385 clips + train.jsonl
-│   ├── joseph/            — Male voice (VoiceDesign-sourced, slot 3002)
-│   │   ├── ref.wav        — deep bass, authoritative, old-school patriarch
-│   │   └── candidates/    — 12 voice design candidates
-│   └── _unsorted/         — Saved but unchosen voice experiments
+│   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
+│       ├── ref.wav
+│       ├── candidates/    — 28 voice design candidates + index.txt
+│       └── training-data/ — 385 clips + train.jsonl
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
-│   ├── katie-v6-8bit/     — 1.2GB 8-bit affine (q_group_size=64)
-│   ├── katie-v6-4bit/     — 960MB 4-bit affine (q_group_size=64) ← THE PICK
-│   └── katie-joe-v7/      — 2.3GB bf16, multi-voice, quality unresolved
+│   ├── katie-v6-4bit/     — 960MB 4-bit affine (previous pick)
+│   ├── katie-joe-v7/      — 2.3GB bf16, multi-voice, quality unresolved
+│   └── quant-experiment/  — All quantization variants tested 2026-04-24
+│       ├── affine-6bit-g64/ — 1094MB ← THE PICK
+│       ├── affine-4bit-g64/ — 960MB (baseline comparison)
+│       ├── affine-4bit-g32/, affine-4bit-g128/ — group size variants
+│       ├── affine-3bit-g64/ — 893MB (BROKEN — EOS lost)
+│       ├── affine-8bit-g64/ — 1210MB
+│       ├── mxfp4/, nvfp4/, mxfp8/ — alternative formats
 ├── samples/               — Audio samples organized by version/voice/precision
-│   ├── benchmark-katie-v6-bf16/    — 10 benchmark clips
-│   ├── benchmark-katie-v6-8bit/    — 10 benchmark clips
-│   ├── benchmark-katie-v6-4bit/    — 10 benchmark clips
+│   ├── quant-experiment/  — A/B samples from quantization experiment
+│   ├── benchmark-katie-v6-{bf16,4bit}/ — older benchmark clips
 │   ├── v6-mlx/, v6-pytorch/, v5/   — earlier samples
 │   └── v7-{mlx,pytorch}-{katie,joe}/ — multi-voice samples
 ├── logs/
@@ -100,66 +103,99 @@ Done via **mlx-audio's own converter** (NOT `mlx_lm.convert` — that doesn't su
 from mlx_audio.convert import convert
 convert(
     hf_path='checkpoints/katie-v6',
-    mlx_path='checkpoints/katie-v6-4bit',
-    quantize=True, q_bits=4, q_group_size=64, q_mode='affine',
+    mlx_path='checkpoints/quant-experiment/affine-6bit-g64',
+    quantize=True, q_bits=6, q_group_size=64, q_mode='affine',
 )
 ```
 
 - Affine quantization: per-group (64 weights) scale + zero-point, weights stored as N-bit integers
 - The converter **selectively keeps critical layers at full precision** (codec_embedding, speaker embeddings, small layers). That's why "4-bit" averages 8.9 bits/weight and "8-bit" averages 11.4 bits/weight.
 - MLX dequantizes on-the-fly in Metal GPU kernels during matmul — no separate unpack step.
-- Other quantization modes available but untested: `mxfp4`, `mxfp8`, `nvfp4`. Mixed precision recipes: `mixed_2_6`, `mixed_3_4`, `mixed_3_6`, `mixed_4_6`. Could improve quality at same size — worth exploring later.
+### Quantization Experiment Results (2026-04-24, M1 Pro)
 
-### Benchmark Results (2026-04-22, M-series Mac)
+Tested all MLX quantization modes against Katie v6 bf16 source. Script: `inference/experiment_quant_methods.py`.
 
-| | bf16 | 8-bit | 4-bit |
-|--|------|-------|-------|
-| Disk | 1.7GB | 1.2GB | **960MB** |
-| Metal RAM (load) | 2,378MB | 1,878MB | **1,611MB** |
-| Metal RAM (peak) | 2,703MB | 2,203MB | **1,936MB** |
-| Activity Monitor | ~3GB | ~2.4GB | **~2GB** |
-| TTFA median | 101ms | 79ms | **79ms** |
-| TTFA range | 80-114ms | 66-81ms | 67-89ms |
-| Effective bits/weight | 16 | 11.4 | 8.9 |
+| Variant | Disk | RAM | TTFA | RTF | Bits/wt | Notes |
+|---------|------|-----|------|-----|---------|-------|
+| **affine 6-bit g64** | **1094M** | **1744M** | **84ms** | **0.67x** | **10.1** | **THE PICK — best voice presence** |
+| affine 4-bit g64 | 960M | 1611M | 77ms | 0.63x | 8.9 | Previous pick. Still good, less presence |
+| affine 4-bit g32 | 994M | 1644M | 77ms | 0.65x | 9.2 | Finer groups, one EOS overshoot |
+| affine 4-bit g128 | 943M | 1594M | 80ms | 0.66x | 8.7 | Coarser groups, slightly slower |
+| nvfp4 | 960M | 1611M | 78ms | 0.65x | 8.9 | Clean, competitive with affine 4-bit |
+| mxfp4 | 943M | 1594M | 82ms | 0.66x | 8.7 | EOS issue on "Okay." (6s generated) |
+| mxfp8 | 1210M | 1861M | 90ms | 0.84x | 11.2 | Worst RTF, TTFA spikes, EOS issues |
+| affine 3-bit g64 | 893M | 1544M | 80ms | 0.64x | 8.3 | BROKEN — all samples clip to 1.0, EOS lost |
 
-**4-bit is the pick.** Sounds more alive than 8-bit despite marginally higher peaks. Smallest disk + RAM footprint. Same TTFA.
+**6-bit affine wins on voice quality.** Noticeably more presence and vocal dynamics than 4-bit. Cost: +134MB RAM, +0.04x RTF — negligible for the quality gain. 3-bit is broken. mxfp8 is surprisingly worse than affine 4-bit despite more bits.
 
 **Important:** Use `mx.metal.get_active_memory()` / `mx.metal.get_peak_memory()` for measuring MLX memory — NOT `psutil.Process().memory_info().rss` which gives garbage numbers for MLX workloads.
 
-## Inference Architecture (decided 2026-04-23)
+## Inference Architecture (updated 2026-04-24)
 
-**Holler is a model, not an inference library.** Ship weights on HuggingFace, users run via mlx-audio. One version, not two (no separate Swift implementation).
+**Holler is a model, not an inference library.** Ship weights on HuggingFace, users run via our fast inference server (`inference/server.py`). Uses mlx-audio for model loading and codec decoding, with a custom generate loop for 2.3x faster streaming.
 
-**For ivi:** mlx-audio Python sidecar process. WebSocket-based, queue-based chunked streaming.
-- LLM streams text → detect sentence boundaries → stream TTS for each sentence
-- Audio chunks go into a playback queue, skip silence chunks (peak < 0.05)
-- First audible audio at 68-126ms after text ready (streaming)
-- Generation always faster than real-time (RTF 0.4-0.7), queue never starves
+### Quick Start
 
-**Sentence timing benchmarks (Katie v6 4-bit, 2026-04-23):**
-| Sentence | Words | Non-stream | Stream TTFA | First audible |
-|----------|-------|------------|-------------|---------------|
-| "Hey!" | 1 | 312ms | 67ms | 319ms (silence) |
-| "Exactly." | 1 | 762ms | 72ms | 126ms |
-| "Yes, I agree." | 3 | 726ms | 68ms | 68ms |
-| "Got it." | 2 | 445ms | — | — |
-| 7-word sentence | 7 | 817ms | 65ms | 320ms |
-| 14-word sentence | 14 | 1,986ms | 65ms | ~200ms |
+```bash
+# 1. Create venv and install dependencies
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-**Streaming wins by ~400-650ms** for most sentences. Exception: very short exclamations ("Hey!") where codec warmup silence means non-streaming ties.
+# 2. Download checkpoint (or use local)
+# TODO: huggingface-cli download sentium/holler-0.6b-6bit --local-dir checkpoints/holler-6bit
+
+# 3. Run server (default checkpoint or specify one)
+python3 inference/server.py
+python3 inference/server.py --checkpoint path/to/checkpoint --port 8100
+# → http://localhost:8100
+
+# 4. Test
+curl "http://localhost:8100/tts?text=Hello+world" -o test.wav
+curl http://localhost:8100/benchmark
+```
+
+### API
+
+```
+POST /tts        — streaming float32 PCM (24kHz mono), chunked transfer encoding
+  Body: {"text": "...", "voice": "katie", "temperature": 0.6, "n_codebooks": 12}
+GET  /tts?text=  — returns WAV file
+GET  /benchmark  — runs 6-sentence benchmark, returns text report
+GET  /health     — {"status": "ok"}
+```
+
+### Performance (M1 Pro, Katie v6 6-bit affine)
+
+| Metric | Value |
+|--------|-------|
+| RTF (streaming) | **0.38 avg**, 0.46 max |
+| TTFA | **139ms avg** |
+| Throughput | 2.6x real-time |
+| Metal RAM (idle) | 1.7 GB |
+| CPU during generation | ~8% |
+| Model on disk | 1094 MB |
+
+### Why not just use mlx-audio directly?
+
+mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.76. Our server gives RTF ~0.34. The difference:
+1. mlx-audio calls `mx.eval()` + `mx.clear_cache()` after every streaming chunk (Metal pipeline thrashing)
+2. We use a custom generate loop with one `mx.eval()` per token, chunked decode with two-phase TTFA
+3. We use 12 of 16 codebooks by default (configurable), skipping highest-frequency acoustic detail
+4. Full details: see `RESEARCH.md` (27 experiments logged)
 
 ## Inference Pipeline
 
-**Stack:** mlx-audio (Python) → MLX → Metal GPU (Apple Silicon unified memory)
+**Stack:** `inference/server.py` → custom generate loop → mlx-audio model/codec → MLX → Metal GPU
 
-1. `mlx_audio.tts.load(checkpoint_path)` loads the model
-2. `model.generate(text=..., voice="katie", language="english", temperature=0.6, stream=True, streaming_interval=0.1)` streams codec tokens at 12Hz
-3. Each chunk yields ~80ms of 24kHz audio (1920 samples)
-4. Play via `sounddevice.OutputStream` or save via `soundfile`
+1. `mlx_audio.tts.load(checkpoint_path)` loads model + speech tokenizer
+2. Custom generate loop: talker LLM → code predictor → codec tokens at 12Hz
+3. Chunked streaming decode: first chunk at 3 tokens (~120ms TTFA), then 40-token chunks
+4. HTTP chunked transfer encoding streams float32 PCM to client
+5. `mx.clear_cache()` after each complete generation to prevent memory accumulation
 
-**Live demo:** `inference/live_demo.py` — HTTP server on port 8099, type text in browser, audio plays from Mac speakers. Uses pre-opened audio stream for minimal latency.
+**Live demo:** `inference/live_demo.py` — HTTP server on port 8099, type text in browser, audio plays from Mac speakers.
 
-**Python venv:** Currently using ivi's venv at `~/Desktop/Files/AI/ivi/audio-test/.venv-tts-bench/` (mlx-audio 0.4.2, mlx-lm 0.31.1, sounddevice 0.5.3). Should create holler's own venv.
+**Python venv:** `requirements.txt` has dependencies. Create with `python3 -m venv .venv && pip install -r requirements.txt`.
 
 ## Known: 220ms Leading Silence
 
@@ -179,7 +215,6 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - Training data: ~385 clips per voice, voice-cloned from a reference through Qwen3-TTS-1.7B-Base. 24kHz mono WAV with 1s trailing silence.
 - Multi-voice: same recipe, but JSONL has per-sample `voice_name` field, and training script tracks embeddings per voice. See `training/sft_12hz_multivoice.py`.
 - Voice name in v6 config is `katie` at slot 3000 (nested under `talker_config.spk_id`).
-- Joseph is slot 3002. VoiceDesign instruct: "Weathered, authoritative male voice... Late fifties, deep bass register. Old-school Soviet toughness." Not yet trained.
 
 ## GPU Training
 
@@ -196,22 +231,33 @@ No Vast.ai instances exist. To train, rent a fresh A100 SXM4 40GB (~$0.50/hr on 
 
 ## HuggingFace Release Target
 
-- `sentium/holler-0.6b` (bf16)
-- `sentium/holler-0.6b-8bit`
-- `sentium/holler-0.6b-4bit` (the pick for most users)
-- Additional precisions as needed
+- `sentium/holler-0.6b` (bf16 — full precision, source for custom quantization)
+- `sentium/holler-0.6b-6bit` (affine 6-bit g64 — the pick, best quality-to-size ratio)
 
 ## Hard-Won Lessons
 
+**Training:**
 - **LR is the dominant knob.** Not loss, not epochs, not community patches.
 - **EOS termination is the diagnostic.** If PyTorch inference hits max_new_tokens on a short sentence, the model is broken.
 - **Always verify with PyTorch inference on GPU first.** It's the ground truth. MLX issues are separable from training issues.
 - **Loss decreasing ≠ quality.** Loss 1.0 produced noise; loss 12.8 produced clean voice.
 - **ref_mel shape is [1, T, 128]** after upstream .transpose(1,2), NOT [1, 128, T]. Pad dim=1 for multi-voice.
 - **Use mlx-audio's converter, not mlx_lm** — mlx_lm doesn't support the qwen3_tts model type.
-- **psutil RSS is garbage for MLX memory** — use `mx.metal.get_active_memory()`.
-- **4-bit quantization works surprisingly well** for voice quality. Sounds more alive than 8-bit.
+
+**Inference (2026-04-24 research session — see RESEARCH.md):**
+- **mlx-audio's streaming mode is the bottleneck, not the model.** `mx.eval()` + `mx.clear_cache()` per chunk thrashes Metal pipeline. Custom generate loop = 2.3x faster.
+- **Code predictor is 71% of generation time.** 15 sequential 5-layer transformer calls per speech token. The main 28-layer talker is only 24%.
+- **12 of 16 codebooks is the sweet spot.** Codebooks 13-16 are highest-frequency acoustic detail. Skipping them = 18% faster, same EOS reliability (96% vs 98%), negligible quality loss.
+- **Two-phase streaming:** first chunk at 3 tokens (~120ms TTFA), then 40-token chunks. Balances latency vs decode overhead.
+- **`mx.clear_cache()` once after generation, not during.** Prevents memory accumulation without hurting performance.
+- **psutil RSS is garbage for MLX memory** — use `mx.get_active_memory()`.
+- **6-bit affine is the quantization sweet spot for TTS.** Noticeably more vocal presence than 4-bit. 4-bit still good, 3-bit destroys EOS. Novel finding — no prior audio model quant benchmarks exist.
 - **Leading silence is architectural** — all codec LMs do it. Trim at inference or overlap with LLM streaming.
+- **Hann crossfade at chunk boundaries:** tested 10ms/20ms/40ms overlap. No audible difference — streaming decoder's internal state already handles continuity.
+- **3-bit quantization destroys EOS.** Model generates 4-25s for short sentences, all samples clip to 1.0. Same failure mode as high LR during training.
+- **mxfp8 is worse than affine 6-bit** despite more bits (11.2 vs 10.1). Slower RTF (0.84x vs 0.67x), TTFA spikes, EOS issues. Float format doesn't help here.
+- **mxfp4 has EOS issues on short utterances.** "Okay." generated 6s. nvfp4 is cleaner but no quality advantage over affine.
+- **Always benchmark through server.py**, never mlx-audio's `model.generate()`. The latter shows RTF 0.63-0.84x; our server shows 0.38x. The difference is `mx.eval()`+`mx.clear_cache()` per chunk.
 
 ## What's NOT Known / Unresolved
 
@@ -219,16 +265,18 @@ No Vast.ai instances exist. To train, rent a fresh A100 SXM4 40GB (~$0.50/hr on 
 - Root cause of v7 quality issues (Katie noise, Joe clipping) — see docs/ivi-session-notes.md "Observations" section
 - Whether sequential training (one voice at a time, cumulative checkpoints) works better than joint
 - Optimal voice count per training run
-- Whether alternative quantization modes (mxfp4, mixed_4_6) give better quality
+- Whether mixed precision (e.g. higher bits for code_predictor, lower for talker) could improve quality at same average bits
 - Whether trimming leading silence from training data reduces the 220ms codec warmup
-- There's reportedly a HuggingFace repo that improved Qwen3-TTS size/inference by 3x — not yet identified
+- EOS failure ~2-4% of the time (model-level, both 12cb and 16cb) — mitigated by safety cap but not eliminated
+- Server crashes during long idle — needs process supervisor for production
 
 ## What's Next
 
-1. **Wire Katie v6 4-bit into ivi** — mlx-audio Python sidecar with WebSocket, queue-based chunked streaming. This is the immediate next step.
-2. **Solve multi-voice quality** — v7 Katie+Joe has issues (short utterances generate silence). Root cause still unknown.
-3. **Design and train more voices** — 28 more needed. Names and characters in `voices/VOICES.md`.
-4. **Standardize GPU runbook** — from-scratch instance setup → training → quantization
-5. **Create holler's own Python venv** — currently borrowing ivi's
-6. **HuggingFace release** under `sentium/` with full docs
-7. **Explore optimizations** — two-phase streaming, alternative quant modes, leading silence trimming
+1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE. `inference/server.py` + `sidecar/tts-sidecar-fast.py`. RTF 0.38, TTFA 139ms (6-bit).
+2. ~~**Try alternative quantization**~~ — ✅ DONE (2026-04-24). Tested 8 variants: affine 3/4/6/8-bit, mxfp4, mxfp8, nvfp4, multiple group sizes. 6-bit affine g64 wins on voice quality. See Quantization section.
+3. **Retrain Katie with better prosody data** — current 385 clips are synthetic (cloned through 1.7B). Real human recordings or higher-quality TTS synthesis for training data would raise the quality ceiling. 6-bit already sounds great with synthetic data — real data would be a step change.
+4. **Solve multi-voice quality** — v7 Katie+Joe has issues (short utterances generate silence). Root cause still unknown.
+5. **Design and train more voices** — 28 more needed. Names and characters in `voices/VOICES.md`.
+6. **Standardize GPU runbook** — from-scratch instance setup → training → quantization → 6-bit conversion
+7. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only
+8. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop. Easy win for the community.
