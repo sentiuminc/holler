@@ -17,6 +17,7 @@ import http.server
 import io
 import json
 import os
+import random
 import socketserver
 import struct
 import sys
@@ -43,6 +44,8 @@ FIRST_CHUNK_TOKENS = 3
 STREAM_CHUNK_TOKENS = 3
 SILENT_ABORT_TOKENS = 16
 DEFAULT_CODEBOOKS = 12
+CARRYOVER_PAUSE_MIN_MS = 150
+CARRYOVER_PAUSE_MAX_MS = 250
 
 model = None
 suppress_indices_cache = None
@@ -159,9 +162,11 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
     trailing_len = trailing_text_hidden.shape[1]
     generated_codes = []
     decoded_up_to = 0
-    speech_started = False
+    speech_started = not reset_decoder
     silent_token_count = 0
     aborted = False
+    pending_silence = []
+    needs_pause = not reset_decoder
 
     if reset_decoder:
         mdl.speech_tokenizer.decoder.reset_streaming_state()
@@ -267,11 +272,24 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
 
             if speech_started:
                 if _has_speech(chunk_np):
+                    if needs_pause:
+                        natural_ms = sum(len(p) for p in pending_silence) / SAMPLE_RATE * 1000
+                        pause_ms = random.randint(CARRYOVER_PAUSE_MIN_MS, CARRYOVER_PAUSE_MAX_MS)
+                        pending_silence.clear()
+                        pending_silence.append(np.zeros(int(SAMPLE_RATE * pause_ms / 1000), dtype=np.float32))
+                        print(f"[holler] Pause: {pause_ms}ms (replaced {natural_ms:.0f}ms natural) | {text[:50]}", flush=True)
+                        needs_pause = False
+                    if pending_silence:
+                        for pending in pending_silence:
+                            yield pending, False
+                        pending_silence.clear()
                     silent_token_count = 0
                     yield chunk_np, False
                 else:
+                    pending_silence.append(chunk_np)
                     silent_token_count += n_new
                     if silent_token_count >= SILENT_ABORT_TOKENS:
+                        pending_silence.clear()
                         aborted = True
                         break
 
