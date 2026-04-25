@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holler TTS Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0a0a0a; color: #e0e0e0;
+    max-width: 900px; margin: 0 auto; padding: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 24px; }
+
+  .input-row {
+    display: flex; gap: 8px; margin-bottom: 12px;
+  }
+  textarea {
+    flex: 1; padding: 10px 12px; border: 1px solid #333; border-radius: 8px;
+    background: #151515; color: #e0e0e0; font-size: 14px; font-family: inherit;
+    resize: vertical; min-height: 44px; outline: none;
+  }
+  textarea:focus { border-color: #555; }
+  button {
+    padding: 10px 20px; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-speak { background: #0a84ff; color: white; min-width: 80px; }
+  .btn-stop { background: #ff453a; color: white; min-width: 80px; }
+  .btn-clear { background: #333; color: #aaa; }
+
+  .controls {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
+    font-size: 13px; flex-wrap: wrap;
+  }
+  .controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls input[type="checkbox"] { accent-color: #0a84ff; }
+  .controls select, .controls input[type="text"] {
+    background: #1a1a1a; color: #ccc; border: 1px solid #333;
+    border-radius: 4px; padding: 3px 6px; font-size: 13px;
+  }
+  .controls input[type="text"] { width: 70px; }
+
+  .metrics {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin-bottom: 20px;
+  }
+  .metric {
+    background: #151515; border: 1px solid #222; border-radius: 8px;
+    padding: 12px; text-align: center;
+  }
+  .metric .label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric .value { font-size: 22px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .metric .unit { font-size: 12px; color: #666; font-weight: 400; }
+
+  .status-bar {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+    font-size: 13px; color: #666;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #333; flex-shrink: 0;
+  }
+  .dot.ready { background: #30d158; }
+  .dot.speaking { background: #0a84ff; animation: pulse 1s infinite; }
+  .dot.error { background: #ff453a; }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+
+  .log-container {
+    background: #111; border: 1px solid #222; border-radius: 8px;
+    overflow: hidden;
+  }
+  .log-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; border-bottom: 1px solid #222;
+    font-size: 12px; color: #666;
+  }
+  .log {
+    font-family: 'SF Mono', 'Menlo', monospace; font-size: 12px;
+    padding: 12px; max-height: 400px; overflow-y: auto;
+    line-height: 1.6; white-space: pre-wrap; color: #888;
+  }
+  .log .info { color: #888; }
+  .log .chunk { color: #0a84ff; }
+  .log .timing { color: #30d158; }
+  .log .warn { color: #ff9f0a; }
+  .log .err { color: #ff453a; }
+
+  .sentence-list {
+    margin-bottom: 20px;
+  }
+  .sentence-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; font-size: 13px; border-bottom: 1px solid #1a1a1a;
+  }
+  .sentence-item .idx { color: #555; width: 20px; text-align: right; flex-shrink: 0; }
+  .sentence-item .text { flex: 1; color: #aaa; }
+  .sentence-item .st { font-family: monospace; font-size: 12px; color: #555; min-width: 60px; text-align: right; }
+  .sentence-item.done .text { color: #e0e0e0; }
+  .sentence-item.active .text { color: #0a84ff; }
+  .sentence-item.done .st { color: #30d158; }
+  .sentence-item.active .st { color: #0a84ff; }
+</style>
+</head>
+<body>
+
+<h1>Holler TTS Test</h1>
+<p class="subtitle">Streams float32 PCM from server.py (port 8100)</p>
+
+<div class="input-row">
+  <textarea id="text" rows="3" placeholder="Type or paste text to speak...">The weather is going to be beautiful today. We should go for a walk in the park. Maybe grab some coffee on the way.</textarea>
+  <div style="display:flex;flex-direction:column;gap:6px;">
+    <button class="btn-speak" id="btn-speak" onclick="speak()">Speak</button>
+    <button class="btn-stop" id="btn-stop" onclick="stopAll()" disabled>Stop</button>
+  </div>
+</div>
+
+<div class="controls">
+  <label><input type="checkbox" id="chk-continue" checked> Carry-over prosody</label>
+  <label><input type="checkbox" id="chk-auto-split" checked> Auto-split sentences</label>
+  <label>Voice: <input type="text" id="inp-voice" value="katie"></label>
+  <label>Temp: <select id="sel-temp">
+    <option value="0.4">0.4</option>
+    <option value="0.5">0.5</option>
+    <option value="0.6" selected>0.6</option>
+    <option value="0.7">0.7</option>
+    <option value="0.8">0.8</option>
+  </select></label>
+  <button class="btn-clear" onclick="replayAudio()" id="btn-replay" disabled>Replay</button>
+  <button class="btn-clear" onclick="downloadAudio()" id="btn-dl" disabled>Download WAV</button>
+  <button class="btn-clear" onclick="clearLog()">Clear Log</button>
+</div>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="status-text">Checking server...</span>
+</div>
+
+<div class="metrics">
+  <div class="metric">
+    <div class="label">TTFA</div>
+    <div class="value" id="m-ttfa">--<span class="unit">ms</span></div>
+  </div>
+  <div class="metric">
+    <div class="label">Duration</div>
+    <div class="value" id="m-dur">--<span class="unit">s</span></div>
+  </div>
+  <div class="metric">
+    <div class="label">RTF</div>
+    <div class="value" id="m-rtf">--</div>
+  </div>
+  <div class="metric">
+    <div class="label">Chunks</div>
+    <div class="value" id="m-chunks">--</div>
+  </div>
+</div>
+
+<div id="sentence-list" class="sentence-list"></div>
+
+<div class="log-container">
+  <div class="log-header">
+    <span>Log</span>
+    <span id="log-count">0 entries</span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const SR = 24000;
+const BASE = location.origin || 'http://localhost:8100';
+
+let audioCtx = null;
+let abortCtrl = null;
+let logCount = 0;
+let isPlaying = false;
+let nextPlayTime = 0;
+let allAudioChunks = [];
+
+function log(msg, cls = 'info') {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `${ts}  ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+  logCount++;
+  document.getElementById('log-count').textContent = `${logCount} entries`;
+}
+
+function clearLog() {
+  document.getElementById('log').innerHTML = '';
+  logCount = 0;
+  document.getElementById('log-count').textContent = '0 entries';
+}
+
+function setMetric(id, val) {
+  document.getElementById(id).innerHTML = val;
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('dot');
+  dot.className = 'dot ' + state;
+  document.getElementById('status-text').textContent = text;
+}
+
+function splitSentences(text) {
+  const abbrevs = /(?:Mr|Mrs|Ms|Dr|Prof|Jr|Sr|St|vs|etc|e\.g|i\.e|U\.S)\./gi;
+  const placeholders = [];
+  let safe = text.replace(abbrevs, (m) => {
+    placeholders.push(m);
+    return `__ABBR${placeholders.length - 1}__`;
+  });
+  safe = safe.replace(/\d+\.\d+/g, (m) => {
+    placeholders.push(m);
+    return `__ABBR${placeholders.length - 1}__`;
+  });
+  const parts = safe.split(/(?<=[.!?])\s+/);
+  return parts.map(p => {
+    return p.replace(/__ABBR(\d+)__/g, (_, i) => placeholders[parseInt(i)]);
+  }).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function renderSentences(sentences, activeIdx) {
+  const el = document.getElementById('sentence-list');
+  el.innerHTML = '';
+  if (sentences.length <= 1) return;
+  sentences.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'sentence-item' + (i < activeIdx ? ' done' : i === activeIdx ? ' active' : '');
+    div.innerHTML = `<span class="idx">${i + 1}</span><span class="text">${s.length > 80 ? s.slice(0, 80) + '...' : s}</span><span class="st" id="sent-st-${i}"></span>`;
+    el.appendChild(div);
+  });
+}
+
+function setSentenceStatus(idx, text, done) {
+  const el = document.getElementById(`sent-st-${idx}`);
+  if (el) el.textContent = text;
+  const items = document.querySelectorAll('.sentence-item');
+  if (items[idx]) {
+    items[idx].classList.remove('active');
+    if (done) items[idx].classList.add('done');
+  }
+  if (!done && items[idx]) items[idx].classList.add('active');
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch(`${BASE}/health`);
+    if (r.ok) {
+      setStatus('ready', 'Server ready');
+      log('Server connected', 'timing');
+      return true;
+    }
+  } catch (e) {}
+  setStatus('error', 'Server not running (start server.py)');
+  log('Cannot reach server at ' + BASE, 'err');
+  return false;
+}
+
+async function speakOne(text, continueP) {
+  const t0 = performance.now();
+  abortCtrl = new AbortController();
+
+  const voice = document.getElementById('inp-voice').value || 'katie';
+  const temp = parseFloat(document.getElementById('sel-temp').value);
+  log(`POST /tts  voice=${voice} continue=${continueP}  "${text.slice(0, 70)}${text.length > 70 ? '...' : ''}"`, 'info');
+
+  const body = JSON.stringify({ text, voice, continue: continueP, temperature: temp });
+
+  const resp = await fetch(`${BASE}/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    signal: abortCtrl.signal,
+  });
+
+  if (!resp.ok) {
+    log(`HTTP ${resp.status}: ${await resp.text()}`, 'err');
+    return { samples: 0, ttfa: null, genMs: 0 };
+  }
+
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: SR });
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  const reader = resp.body.getReader();
+  let leftover = new Uint8Array(0);
+  let totalSamples = 0;
+  let chunkIdx = 0;
+  let ttfa = null;
+  if (nextPlayTime < audioCtx.currentTime) nextPlayTime = audioCtx.currentTime;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const combined = new Uint8Array(leftover.length + value.length);
+    combined.set(leftover);
+    combined.set(value, leftover.length);
+
+    const sampleBytes = 4;
+    const usable = Math.floor(combined.length / sampleBytes) * sampleBytes;
+    leftover = combined.slice(usable);
+
+    if (usable === 0) continue;
+
+    const float32 = new Float32Array(combined.buffer.slice(combined.byteOffset, combined.byteOffset + usable));
+    const nSamples = float32.length;
+
+    if (nSamples === 0) continue;
+
+    if (ttfa === null) {
+      ttfa = performance.now() - t0;
+      log(`TTFA: ${ttfa.toFixed(0)}ms`, 'timing');
+    }
+
+    let peak = 0, sumSq = 0;
+    for (let i = 0; i < nSamples; i++) {
+      const v = Math.abs(float32[i]);
+      if (v > peak) peak = v;
+      sumSq += float32[i] * float32[i];
+    }
+    const rms = Math.sqrt(sumSq / nSamples);
+    const durMs = (nSamples / SR * 1000).toFixed(0);
+
+    log(`chunk ${chunkIdx}: ${nSamples} samples (${durMs}ms)  peak=${peak.toFixed(3)}  rms=${rms.toFixed(4)}`, 'chunk');
+
+    allAudioChunks.push(new Float32Array(float32));
+
+    const buf = audioCtx.createBuffer(1, nSamples, SR);
+    buf.getChannelData(0).set(float32);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+
+    if (nextPlayTime < audioCtx.currentTime) {
+      nextPlayTime = audioCtx.currentTime;
+    }
+    src.start(nextPlayTime);
+    nextPlayTime += buf.duration;
+
+    totalSamples += nSamples;
+    chunkIdx++;
+  }
+
+  const genMs = performance.now() - t0;
+  const audioDur = totalSamples / SR;
+  const rtf = audioDur > 0 ? (genMs / 1000) / audioDur : 0;
+
+  log(`done: ${chunkIdx} chunks, ${audioDur.toFixed(2)}s audio, ${genMs.toFixed(0)}ms gen, RTF=${rtf.toFixed(3)}`, 'timing');
+
+  return { samples: totalSamples, ttfa, genMs, chunks: chunkIdx, audioDur, rtf };
+}
+
+async function speak() {
+  const ok = await checkHealth();
+  if (!ok) return;
+
+  const rawText = document.getElementById('text').value.trim();
+  if (!rawText) return;
+
+  const autoSplit = document.getElementById('chk-auto-split').checked;
+  const carryOver = document.getElementById('chk-continue').checked;
+  const sentences = autoSplit ? splitSentences(rawText) : [rawText];
+
+  document.getElementById('btn-speak').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  isPlaying = true;
+  nextPlayTime = 0;
+  allAudioChunks = [];
+  document.getElementById('btn-dl').disabled = true;
+  setStatus('speaking', 'Speaking...');
+
+  renderSentences(sentences, 0);
+
+  let totalSamples = 0;
+  let totalGenMs = 0;
+  let firstTtfa = null;
+  let totalChunks = 0;
+  const tAll = performance.now();
+
+  try {
+    for (let i = 0; i < sentences.length; i++) {
+      if (!isPlaying) break;
+
+      const cont = carryOver && i > 0;
+      setSentenceStatus(i, 'generating...', false);
+
+      const result = await speakOne(sentences[i], cont);
+
+      totalSamples += result.samples;
+      totalGenMs += result.genMs;
+      totalChunks += (result.chunks || 0);
+      if (firstTtfa === null && result.ttfa !== null) firstTtfa = result.ttfa;
+
+      setSentenceStatus(i, `${(result.audioDur || 0).toFixed(1)}s`, true);
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      log(`Error: ${e.message}`, 'err');
+    }
+  }
+
+  const totalDur = totalSamples / SR;
+  const wallMs = performance.now() - tAll;
+  const rtf = totalDur > 0 ? (wallMs / 1000) / totalDur : 0;
+
+  setMetric('m-ttfa', firstTtfa !== null ? `${firstTtfa.toFixed(0)}<span class="unit">ms</span>` : '--');
+  setMetric('m-dur', `${totalDur.toFixed(1)}<span class="unit">s</span>`);
+  setMetric('m-rtf', rtf.toFixed(3));
+  setMetric('m-chunks', totalChunks);
+
+  if (sentences.length > 1) {
+    log(`total: ${sentences.length} sentences, ${totalDur.toFixed(2)}s audio, ${wallMs.toFixed(0)}ms wall, RTF=${rtf.toFixed(3)}`, 'timing');
+  }
+
+  setStatus('ready', 'Ready');
+  document.getElementById('btn-speak').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('btn-dl').disabled = allAudioChunks.length === 0;
+  document.getElementById('btn-replay').disabled = allAudioChunks.length === 0;
+  isPlaying = false;
+}
+
+async function replayAudio() {
+  if (allAudioChunks.length === 0) return;
+  if (!audioCtx) audioCtx = new AudioContext({ sampleRate: SR });
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  let t = audioCtx.currentTime;
+  for (const chunk of allAudioChunks) {
+    const buf = audioCtx.createBuffer(1, chunk.length, SR);
+    buf.getChannelData(0).set(chunk);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(t);
+    t += buf.duration;
+  }
+  log(`Replaying ${(t - audioCtx.currentTime).toFixed(2)}s`, 'timing');
+}
+
+function downloadAudio() {
+  if (allAudioChunks.length === 0) return;
+  let total = 0;
+  for (const c of allAudioChunks) total += c.length;
+  const merged = new Float32Array(total);
+  let off = 0;
+  for (const c of allAudioChunks) { merged.set(c, off); off += c.length; }
+  const dataSize = total * 2;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4,36+dataSize,true); w(8,'WAVE'); w(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,SR,true); v.setUint32(28,SR*2,true); v.setUint16(32,2,true);
+  v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,dataSize,true);
+  for (let i = 0; i < total; i++) v.setInt16(44+i*2, Math.max(-32768, Math.min(32767, Math.round(merged[i]*32767))), true);
+  const blob = new Blob([buf], {type:'audio/wav'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `holler-${new Date().toISOString().slice(11,19).replace(/:/g,'')}.wav`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function stopAll() {
+  isPlaying = false;
+  if (abortCtrl) abortCtrl.abort();
+  if (audioCtx) audioCtx.close().then(() => { audioCtx = null; });
+  setStatus('ready', 'Stopped');
+  document.getElementById('btn-speak').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  log('Stopped by user', 'warn');
+}
+
+document.getElementById('text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (!document.getElementById('btn-speak').disabled) speak();
+  }
+});
+
+checkHealth();
+</script>
+</body>
+</html>
