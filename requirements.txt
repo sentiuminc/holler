@@ -1,2 +1,9 @@
-mlx-audio>=0.4.2
-numpy
+mlx-audio>=0.4.1
+numpy==1.26.4
+torch==2.6.0
+torchaudio==2.6.0
+scipy>=1.17
+soundfile>=0.12
+clearvoice>=0.1.2
+DeepFilterNet>=0.5.6
+noisereduce>=3.0
