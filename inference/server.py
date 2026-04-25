@@ -118,7 +118,7 @@ def _apply_trailing_fadeout(chunk, fade_ms=20):
 
 
 def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
-                    n_codebooks, reset_decoder):
+                    n_codebooks, reset_decoder, cache_out=None):
     """Core generation loop with 4-piece silence handling.
 
     Piece 1: skip silent chunks before speech (codec warmup removal)
@@ -127,6 +127,9 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
     Piece 4: post-speech silence buffer + abort after SILENT_ABORT_TOKENS
 
     Yields (chunk, aborted) tuples. aborted=True signals the caller to retry.
+
+    cache_out: if provided, a dict. On exit, cache_out["talker_cache"] is set
+    to the talker KV cache for carry-over into the next call.
     """
     config = mdl.config.talker_config
     eos_token_id = config.codec_eos_token_id
@@ -141,7 +144,12 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
     )
     mx.eval(input_embeds, trailing_text_hidden, tts_pad_embed)
 
-    cache = mdl.talker.make_cache()
+    if cache_out is not None and "talker_cache" in cache_out and not reset_decoder:
+        cache = cache_out["talker_cache"]
+        kv_offset = cache[0].offset if cache else 0
+        print(f"[holler] Talker KV carry-over: {kv_offset} tokens in cache", flush=True)
+    else:
+        cache = mdl.talker.make_cache()
     code_cache = mdl.talker.code_predictor.make_cache()
     get_input_emb = mdl.talker.get_input_embeddings()
     code_pred = mdl.talker.code_predictor
@@ -158,8 +166,22 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
     if reset_decoder:
         mdl.speech_tokenizer.decoder.reset_streaming_state()
 
+    # Pre-compute mask for first call when carrying over talker KV cache.
+    # The auto-generated causal mask only covers (seq_len, seq_len), but with
+    # a warm cache we need (seq_len, seq_len + cache_offset).
+    first_call_mask = None
+    cache_offset = cache[0].offset if cache and cache[0].offset > 0 else 0
+    if cache_offset > 0:
+        seq_len = input_embeds.shape[1]
+        total_len = seq_len + cache_offset
+        rows = mx.arange(seq_len)
+        cols = mx.arange(total_len)
+        mask = (cols[None, :] > (rows[:, None] + cache_offset))
+        first_call_mask = mask.astype(input_embeds.dtype) * mx.finfo(input_embeds.dtype).min
+
     for step in range(safe_max):
-        logits, hidden = mdl.talker(input_embeds, cache=cache)
+        mask_arg = first_call_mask if step == 0 and first_call_mask is not None else None
+        logits, hidden = mdl.talker(input_embeds, cache=cache, mask=mask_arg)
 
         first_logits = logits[:, -1, :]
         first_logits = mx.put_along_axis(
@@ -275,11 +297,17 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
                 chunk_np = _apply_trailing_fadeout(chunk_np)
                 yield chunk_np, False
 
-    mx.clear_cache()
+    if cache_out is not None:
+        cache_out["talker_cache"] = cache
+
+    if reset_decoder:
+        mx.clear_cache()
 
     if aborted and not speech_started:
         yield np.array([], dtype=np.float32), True
 
+
+_carry_over_state = {}
 
 def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6,
                    top_k=50, max_tokens=500, n_codebooks=DEFAULT_CODEBOOKS,
@@ -289,28 +317,45 @@ def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6
     Wraps _run_generation with retry logic: if the first attempt aborts
     (no speech after SILENT_ABORT_TOKENS), retries once with fresh decoder state.
 
+    When reset_decoder=False, persists the talker KV cache across calls
+    so the LLM sees previous sentences' token history.
+
     NOT thread-safe — callers must acquire generate_lock before iterating.
     """
-    got_speech = False
+    global _carry_over_state
+    cache_out = _carry_over_state if not reset_decoder else {}
+    if reset_decoder:
+        _carry_over_state = {}
 
-    for chunk, aborted in _run_generation(
-        mdl, text, voice, language, temperature, top_k, max_tokens,
-        n_codebooks, reset_decoder
-    ):
-        if aborted and not got_speech:
-            print(f"[holler] Abort (no speech after {SILENT_ABORT_TOKENS} tokens), retrying | {text}", flush=True)
+    retry_temps = [temperature, min(temperature + 0.1, 1.0), min(temperature + 0.2, 1.0), min(temperature + 0.3, 1.0)]
+    attempts = [
+        (reset_decoder, cache_out, retry_temps[0]),
+        (True, {}, retry_temps[1]),
+        (True, {}, retry_temps[2]),
+        (True, {}, retry_temps[3]),
+    ]
+
+    for attempt, (rst, cout, temp) in enumerate(attempts):
+        if attempt > 0:
+            print(f"[holler] Abort (no speech), retry {attempt}/3 temp={temp} | {text}", flush=True)
             mdl.speech_tokenizer.decoder.reset_streaming_state()
-            for chunk2, aborted2 in _run_generation(
-                mdl, text, voice, language, temperature, top_k, max_tokens,
-                n_codebooks, reset_decoder=True
-            ):
-                if not aborted2 and len(chunk2) > 0:
-                    got_speech = True
-                    yield chunk2
+
+        got_speech = False
+        for chunk, aborted in _run_generation(
+            mdl, text, voice, language, temperature=temp, top_k=top_k,
+            max_tokens=max_tokens, n_codebooks=n_codebooks,
+            reset_decoder=rst, cache_out=cout
+        ):
+            if aborted:
+                break
+            if len(chunk) > 0:
+                got_speech = True
+                yield chunk
+
+        if got_speech:
             return
-        if len(chunk) > 0:
-            got_speech = True
-            yield chunk
+
+    print(f"[holler] All retries failed | {text}", flush=True)
 
 
 generate_lock = threading.Lock()
