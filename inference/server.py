@@ -353,12 +353,23 @@ def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6
         (True, {}, retry_temps[3]),
     ]
 
+    # TODO(FIXME): short audio retry may not be needed. The model sometimes
+    # produces 0.4s of audio for a 10-word sentence — _has_speech passes it
+    # (2-of-3 RMS windows > 0.007) but it sounds like silence. Root cause
+    # unclear: either the threshold is too low or the model outputs a brief
+    # artifact. Capture a short WAV in the wild to diagnose. This retry is a
+    # safety net — if the upstream detection is fixed, remove it.
+    word_count = len(text.split())
+    min_audio_samples = int(word_count * 0.08 * SAMPLE_RATE)
+
     for attempt, (rst, cout, temp) in enumerate(attempts):
         if attempt > 0:
-            print(f"[holler] Abort (no speech), retry {attempt}/3 temp={temp} | {text}", flush=True)
+            reason = "no speech" if total_samples == 0 else f"too short ({total_samples/SAMPLE_RATE:.1f}s for {word_count}w)"
+            print(f"[holler] Abort ({reason}), retry {attempt}/3 temp={temp} | {text}", flush=True)
             mdl.speech_tokenizer.decoder.reset_streaming_state()
 
         got_speech = False
+        total_samples = 0
         for chunk, aborted in _run_generation(
             mdl, text, voice, language, temperature=temp, top_k=top_k,
             max_tokens=max_tokens, n_codebooks=n_codebooks,
@@ -368,9 +379,10 @@ def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6
                 break
             if len(chunk) > 0:
                 got_speech = True
+                total_samples += len(chunk)
                 yield chunk
 
-        if got_speech:
+        if got_speech and total_samples >= min_audio_samples:
             return
 
     print(f"[holler] All retries failed | {text}", flush=True)
