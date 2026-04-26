@@ -299,7 +299,7 @@ document.addEventListener("keydown", e => {
   else if (e.key === "ArrowRight") { e.preventDefault(); decide("keep"); }
   else if (e.key === "ArrowDown") { e.preventDefault(); decide("maybe"); }
   else if (e.key === "Shift") { e.preventDefault(); undo(); }
-  else if (e.key === " ") { e.preventDefault(); replay(); }
+  else if (e.key === " " || e.key === "Alt") { e.preventDefault(); replay(); }
 });
 
 init();

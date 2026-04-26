@@ -12,18 +12,19 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Origin:** Started as the voice component of [ivi](https://ivi.computer), a macOS notch AI assistant by Sentium. We open-sourced it because Qwen3-TTS is SOTA for local inference but ships with only 2 mediocre English voices — and nothing else fills that gap.
 
-## Current State (2026-04-24)
+## Current State (2026-04-26)
 
-- **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only on upstream `sft_12hz.py`.
-- **Single-voice (Katie, v6):** Clean. Production-ready.
-- **Quantization:** 6-bit affine g64 is the pick (2026-04-24). Noticeably better voice presence/dynamics than 4-bit. Full experiment results in Quantization section below.
+- **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only. Now with `--save_every_steps` for fractional epoch checkpoints.
+- **Katie v6 (current production):** Clean. 6-bit affine g64, RTF 0.38, TTFA 139ms.
+- **Katie v8 training data (ready):** 452 curated clips, 31.3 min, enhanced (ClearVoice→DeepFilter→RecipeE→presence boost). At `voices/katie/training-data/train_curated.jsonl`. Mixed prosody: 18% emotional, 6% questions, 76% statements. Next step: rent GPU and train.
+- **Quantization:** 6-bit affine g64 is the pick.
   - `checkpoints/katie-v6/` — bf16, 1.7GB disk (source for quantization)
   - `checkpoints/quant-experiment/affine-6bit-g64/` — **6-bit affine (the pick)**, 1094MB disk, 1.7GB Metal RAM, RTF 0.38, TTFA 139ms
-  - `checkpoints/katie-v6-4bit/` — 4-bit affine (previous pick), 960MB disk — still works but less voice presence
-- **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues: short utterances like "Okay." generate silence. Not production-grade.
+- **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues. Not production-grade.
 - **Voices designed:** 2/30 (Katie, Joe). 28 more needed.
-- **Inference runtime:** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit. Accepts `--checkpoint` and `--port` flags.
-- **Swift evaluation:** soniqo/speech-swift tested 2026-04-23. Rejected — audio pops, end cutoff, streaming crash after ~13 calls. Reference code at `speech-swift/` for future use.
+- **Inference runtime:** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
+- **Training data tools:** Full pipeline automated — `tools/regenerate_rejects.py`, `tools/enhance_clips.py`, `tools/trim_and_merge.py`, `tools/curate_clips.py`.
+- **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
 
 ## Structure
 
@@ -55,9 +56,12 @@ holler/
 │   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
 │       ├── ref.wav
 │       ├── candidates/    — 28 voice design candidates + index.txt
-│       └── training-data/ — 385 clips + train.jsonl
-│           ├── audio/           — enhanced clips
-│           └── audio-original/  — pre-enhancement backups
+│       └── training-data/ — 452 curated clips (v2) + train_curated.jsonl
+│           ├── audio/           — enhanced clips (ClearVoice→DeepFilter→RecipeE→presence)
+│           ├── audio-original/  — pre-enhancement backups (v1 originals)
+│           ├── audio-enhanced-backup/ — pre-enhancement of emotional batch
+│           ├── curation.json    — Tinder decisions (452 keep, 23 reject)
+│           └── train_curated.jsonl — TRAINING FILE (452 entries)
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
 │   ├── katie-v6-4bit/     — 960MB 4-bit affine (previous pick)
@@ -85,18 +89,29 @@ holler/
 ## The Winning Recipe
 
 ```bash
-python3 sft_12hz.py \
+# Standard (epoch-only checkpoints)
+python3 sft_12hz_patched.py \
   --init_model_path /path/to/Qwen3-TTS-12Hz-0.6B-Base \
   --output_model_path /path/to/output \
-  --train_jsonl /path/to/train_with_codes.jsonl \
+  --train_jsonl /path/to/train_curated.jsonl \
   --batch_size 2 --lr 1e-7 --num_epochs 2 \
-  --speaker_name voice_name
+  --speaker_name katie
+
+# Fine-grained (fractional epoch checkpoints every 45 steps ≈ 0.2 epochs)
+python3 sft_12hz_patched.py \
+  --init_model_path /path/to/Qwen3-TTS-12Hz-0.6B-Base \
+  --output_model_path /path/to/output \
+  --train_jsonl /path/to/train_curated.jsonl \
+  --batch_size 2 --lr 1e-7 --num_epochs 2 \
+  --speaker_name katie --save_every_steps 45
 ```
+
+With 452 clips at batch_size=2: 226 steps/epoch. `--save_every_steps 45` gives checkpoints at ~0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0 epochs. Each checkpoint is a full model copy (~1.7GB bf16), so budget ~17GB disk.
 
 - **lr=1e-7 is critical.** Higher LRs (2e-6, 2e-5) destroy EOS token — model generates until max_new_tokens.
 - **Only patch needed:** Wrap `text_embedding` with `text_projection` on line ~89 of upstream `sft_12hz.py` (fixes 0.6B dimension mismatch). Script: `training/sft_12hz_patched.py`.
 - **Do NOT apply** the "double label shift" fix or "remove sub-codebook loop" fix at this LR — they break training.
-- **Epoch 1** is the pick. Epoch 0 is underfit, epoch 2+ can drift.
+- **Epoch 1 was the pick for v6.** With v8's improved data, sweep 0.6–1.4 to find optimal.
 - **Loss stays at ~12-13.** That's correct. Low loss at higher LR = overfitting, not quality.
 
 ## Quantization
@@ -212,16 +227,36 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
-## Training Data Enhancement (2026-04-24)
+## Training Data Pipeline (updated 2026-04-25)
 
-All training clips (Katie 385 + Joe 385 = 770) processed through a 3-stage enhancement pipeline. Originals backed up at `voices/*/training-data/audio-original/`.
+### Step 0: Enhance reference audio FIRST
 
-**Pipeline: ClearVoice → DeepFilterNet3 → Recipe E**
+Before cloning training data, run the reference audio through the enhancement pipeline. This is critical — source audio quality (especially from services like Cartesia) often has noise, peaks, and artifacts that the 1.7B model will faithfully clone into every training clip. A/B test the enhanced ref vs original and pick the better one. Enhanced ref saved alongside original (e.g. `ref_enhanced.wav`).
 
-1. **ClearVoice MossFormer2_SE_48K** — Alibaba's 50M-param speech enhancer. Uses spectral masking (NOT vocoding — preserves voice identity). Outputs at 48kHz, resample back to 24kHz.
-2. **DeepFilterNet3** — 2.1M-param neural denoiser. Fine-grained noise removal in 2-6kHz range (ear fatigue zone). Resample 24k→48k→24k.
-3. **Recipe E** — 80Hz high-pass filter (scipy butter order 4) + 30% stationary spectral denoise (noisereduce).
-4. **Peak matching** — scale output so peak matches original, preventing volume change.
+### Step 1: Generate clips via 1.7B voice cloning
+
+Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit` with the (enhanced) reference audio. Temperature 0.9 recommended (1.0 causes clipping in ~30% of clips). Append 1s silence for cutoff detection (will be trimmed).
+
+### Step 2: Trim silence
+
+100ms lead + 100ms trail padding, 20ms fade-out. Reject clips with abrupt cutoffs (peak > 0.03 in last 50ms before the 1s silence pad). Auto-retry once on cutoff. Script: `tools/trim_and_merge.py`.
+
+### Step 3: Enhance clips
+
+Peak normalize clippers only (>= 0.999 peak → scale to -1dB), then run through enhancement pipeline. Script: `tools/enhance_clips.py`.
+
+### Step 4: Curate via Clip Tinder
+
+`tools/curate_clips.py --voice <name>` — swipe through clips, keep/reject/maybe. Regenerate rejects with `tools/regenerate_rejects.py`.
+
+### Enhancement Pipeline: ClearVoice → DeepFilterNet3 → Recipe E
+
+Applied to both reference audio and training clips.
+
+1. **ClearVoice MossFormer2_SE_48K** — Alibaba's 50M-param speech enhancer. Uses spectral masking (NOT vocoding — preserves voice identity). Outputs at 48kHz, resample back to 24kHz via `signal.resample_poly`.
+2. **DeepFilterNet3** — 2.1M-param neural denoiser. Fine-grained noise removal in 2-6kHz range (ear fatigue zone). Resample 24k→48k→24k via `signal.resample_poly`.
+3. **Recipe E** — 80Hz high-pass filter (scipy butter order 4) + 30% **stationary** spectral denoise (noisereduce). `stationary=True` is critical — without it, noisereduce is too aggressive and "boxes in" the sound.
+4. **Peak normalize clippers only** — only scale down clips where peak >= 0.999. Don't normalize everything (reduces overall volume by ~1dB for no reason).
 
 **Why this order:** ClearVoice does broad spectral cleanup (understands speech structure), DeepFilterNet does fine-grained residual noise, Recipe E catches low-frequency rumble. Each pass is complementary. Reversed order (DF→CV→E) sounds worse.
 
@@ -241,13 +276,96 @@ All training clips (Katie 385 + Joe 385 = 770) processed through a 3-stage enhan
 - Multi-voice: same recipe, but JSONL has per-sample `voice_name` field, and training script tracks embeddings per voice. See `training/sft_12hz_multivoice.py`.
 - Voice name in v6 config is `katie` at slot 3000 (nested under `talker_config.spk_id`).
 
-## GPU Training
+## GPU Training Runbook
 
-No Vast.ai instances exist. To train, rent a fresh A100 SXM4 40GB (~$0.50/hr on Vast.ai) and follow the runbook in `docs/ivi-session-notes.md` steps 1-11. All training data is local under `voices/`.
+**Requirements:** 24GB+ VRAM, CUDA 12.x, bf16 support. A100 SXM4 40GB (~$0.56/hr) or RTX 4090 (~$0.30/hr) on Vast.ai. 80GB disk is enough for single-voice + all checkpoints (~17GB).
 
-**Requirements:** 24GB+ VRAM, CUDA, bf16 support. Training takes ~3-5 min per 2 epochs on A100 with 385 clips per voice.
+**Docker image:** `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`
 
-**Runbook needs standardizing** — the current docs have single-voice steps 1-11, multi-voice is more narrative. Should be consolidated into a proper from-scratch runbook before scaling to 30 voices.
+**SSH key:** `~/.ssh/runpod` works for Vast.ai instances.
+
+### Step 1: Rent + Setup
+
+```bash
+# Rent instance (search for cheapest A100 or 4090)
+vastai search offers 'gpu_name=A100_SXM4 num_gpus=1 rentable=true' -o 'dph_total' --limit 5
+vastai create instance <ID> --image pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel --disk 80
+
+# Wait for running, get SSH details
+vastai show instances
+
+# Upload and run setup script
+scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_setup.sh root@<HOST>:/workspace/
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_setup.sh"
+```
+
+Setup installs into `/workspace/.venv`: torch 2.6, qwen-tts, flash-attn 2.7.3, sox. Downloads 0.6B-Base model + tokenizer. Clones Qwen3-TTS repo. Takes ~5 min.
+
+### Step 2: Upload Training Data
+
+```bash
+# Create remote dir, upload ONLY what's needed
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "mkdir -p /workspace/training-data"
+scp -i ~/.ssh/runpod -P <PORT> -r voices/<voice>/training-data/audio root@<HOST>:/workspace/training-data/
+scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/training-data/ref.wav root@<HOST>:/workspace/training-data/
+scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/training-data/train_curated.jsonl root@<HOST>:/workspace/training-data/
+scp -i ~/.ssh/runpod -P <PORT> holler/training/sft_12hz_patched.py root@<HOST>:/workspace/
+
+# Verify checksums — entire audio folder + JSONL must match local
+# Local (macOS):
+cd voices/<voice>/training-data && find audio -name '*.wav' -type f | sort | xargs md5 -q | md5 -q && md5 -q train_curated.jsonl
+# Remote:
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "cd /workspace/training-data && find audio -name '*.wav' -type f | sort | xargs md5sum | md5sum && md5sum train_curated.jsonl"
+```
+
+Both hashes must match (note: md5 vs md5sum output format differs, compare the hex digest only). Do NOT upload backup dirs (`audio-original/`, `audio-enhanced-backup/`).
+
+### Step 3: Train
+
+```bash
+scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_train.sh root@<HOST>:/workspace/
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_train.sh katie"
+```
+
+`remote_train.sh` handles tokenization, symlinks, and training. ~5 min for 452 clips on A100.
+
+### Step 4: Verify with PyTorch Inference
+
+```bash
+# Upload sweep script, run on GPU
+scp -i ~/.ssh/runpod -P <PORT> holler/inference/test_epoch_sweep.py root@<HOST>:/workspace/
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "/workspace/.venv/bin/python3 /workspace/test_epoch_sweep.py"
+
+# Download samples
+scp -i ~/.ssh/runpod -P <PORT> -r root@<HOST>:/workspace/samples/ ~/Downloads/
+```
+
+Check: voice sounds right, EOS terminates (no runaways), audio lengths proportional to text.
+
+### Step 5: Download Winner + Quantize Locally
+
+```bash
+# Download checkpoint
+scp -i ~/.ssh/runpod -P <PORT> -r root@<HOST>:/workspace/output/checkpoint-epoch-<N>/ holler/checkpoints/<voice>-v<X>/
+
+# Destroy instance
+vastai destroy instance <ID>
+
+# Quantize on Mac (6-bit affine g64)
+python3 -c "
+from mlx_audio.convert import convert
+convert(hf_path='holler/checkpoints/<voice>-v<X>', mlx_path='holler/checkpoints/<voice>-v<X>-6bit', quantize=True, q_bits=6, q_group_size=64, q_mode='affine')
+"
+```
+
+### Hard-Won Environment Lessons
+
+- **flash-attn 2.7.3** works with torch 2.6. Version 2.8.3 does NOT (ABI symbol mismatch).
+- **Never install into system python.** Always venv. `--force-reinstall` on system python cascades into torch version hell.
+- **Install `wheel` + `setuptools` before flash-attn** — it builds from source and needs them.
+- **`sox` must be installed via apt** — `prepare_data.py` needs the binary, not a Python package.
+- **sdpa is a valid fallback** if flash-attn won't build. Training produces identical results. Inference should use flash_attention_2 when available.
+- **JSONL relative paths** (`./audio/`, `./ref.wav`) resolve from cwd. Symlink into the working directory.
 
 ## Community References
 

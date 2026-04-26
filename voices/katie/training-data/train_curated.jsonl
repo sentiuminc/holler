@@ -18,8 +18,6 @@
 {"audio": "./audio/clip_0018.wav", "text": "Everything is running smoothly on my end.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0019.wav", "text": "I'm ready whenever you are.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0020.wav", "text": "Let me know if you need anything else.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0021.wav", "text": "Sure, I can help with that.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0022.wav", "text": "Give me just a second.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0023.wav", "text": "That's a great question actually.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0024.wav", "text": "I hadn't thought of it that way.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0025.wav", "text": "You make a really good point.", "ref_audio": "./ref.wav"}
@@ -55,7 +53,6 @@
 {"audio": "./audio/clip_0055.wav", "text": "The way I see it, we have two main options. We can either fix the existing system or build something new from scratch. Each has its own set of tradeoffs.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0056.wav", "text": "What would you like me to focus on first?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0057.wav", "text": "Should I go ahead and make those changes now?", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0058.wav", "text": "Do you want the short version or the full breakdown?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0059.wav", "text": "Have you tried restarting the application?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0060.wav", "text": "What's the deadline we're working with here?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0061.wav", "text": "Is there anything else you'd like me to look into?", "ref_audio": "./ref.wav"}
@@ -191,13 +188,9 @@
 {"audio": "./audio/clip_0191.wav", "text": "The printing press changed everything. Before Gutenberg, books had to be copied by hand, one page at a time.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0192.wav", "text": "Ancient Romans used concrete that was in some ways better than what we use today. Their structures have lasted two thousand years.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0193.wav", "text": "The Great Wall of China isn't actually visible from space with the naked eye. That's one of those myths that won't go away.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0194.wav", "text": "Coffee was discovered in Ethiopia, according to legend, when a goat herder noticed his animals getting energetic after eating certain berries.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0195.wav", "text": "The library of Alexandria was one of the greatest centers of knowledge in the ancient world. Its destruction is still debated by historians.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0196.wav", "text": "Chess has been around for over fifteen hundred years. It originated in India and spread along trade routes to Persia and then Europe.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0197.wav", "text": "The first email was sent in nineteen seventy one. The content of the message has been forgotten, probably something like a test.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0198.wav", "text": "Paper money was first used in China during the Tang dynasty, around the seventh century. Europe didn't adopt it until much later.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0199.wav", "text": "The Rosetta Stone was the key to deciphering Egyptian hieroglyphics. It contained the same text in three different scripts.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0200.wav", "text": "Viking explorers reached North America about five hundred years before Columbus. They called it Vinland.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0201.wav", "text": "The concept of zero as a number was developed independently in several cultures, but Indian mathematicians formalized it around the fifth century.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0202.wav", "text": "Shakespeare invented over seventeen hundred words that we still use today, including lonely, generous, and eyeball.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0203.wav", "text": "The Silk Road wasn't a single road. It was a network of trade routes connecting East Asia to the Mediterranean.", "ref_audio": "./ref.wav"}
@@ -214,7 +207,6 @@
 {"audio": "./audio/clip_0214.wav", "text": "Fresh herbs make a huge difference in cooking. Adding them at the end preserves their flavor and color.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0215.wav", "text": "The maillard reaction is what gives browned food its complex flavor. It's not just caramelization, it's a chemical reaction between amino acids and sugars.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0216.wav", "text": "There's a specific kind of tiredness that comes from being productive all day. It feels different from doing nothing.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0217.wav", "text": "Sometimes the best part of the day is that first cup of coffee in the morning, when everything is still quiet.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0218.wav", "text": "People underestimate how much a good night's sleep can change your perspective on a problem.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0219.wav", "text": "The sound of rain on a window is one of those universally calming things. There's probably an evolutionary reason for it.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0220.wav", "text": "Walking is underrated as exercise. A thirty minute walk every day can do wonders for both physical and mental health.", "ref_audio": "./ref.wav"}
@@ -225,10 +217,8 @@
 {"audio": "./audio/clip_0225.wav", "text": "The best conversations usually happen when you're not trying to have a great conversation. They just flow naturally.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0226.wav", "text": "There's a word in Japanese, komorebi, that means sunlight filtering through tree leaves. Some concepts just don't translate easily.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0227.wav", "text": "Most people check their phone within the first ten minutes of waking up. It's become such an automatic habit.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0228.wav", "text": "The difference between a house and a home is entirely about how it makes you feel when you walk through the door.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0229.wav", "text": "Libraries are one of the few remaining public spaces where you can just exist without being expected to buy something.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0230.wav", "text": "A clean desk doesn't necessarily mean a productive person, but it does tend to reduce mental clutter.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0231.wav", "text": "Tokyo at night feels like stepping into the future. The neon lights, the efficiency, the energy of the city.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0232.wav", "text": "There's a small town in Iceland where the entire population is less than three hundred, and they still have a swimming pool.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0233.wav", "text": "The best travel advice is to pack half of what you think you need and bring twice the money.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0234.wav", "text": "Night trains across Europe have their own kind of romance. Falling asleep in one country and waking up in another.", "ref_audio": "./ref.wav"}
@@ -272,14 +262,12 @@
 {"audio": "./audio/clip_0272.wav", "text": "The difference between knowledge and wisdom is that knowledge is knowing what to do, and wisdom is knowing when to do it.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0273.wav", "text": "Sometimes the hardest part of solving a problem is admitting that it exists in the first place.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0274.wav", "text": "Perfection is the enemy of done. At some point you have to ship it and iterate.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0275.wav", "text": "The best way to learn something is to try to teach it to someone else. It exposes all the gaps in your understanding.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0276.wav", "text": "Confidence isn't about knowing you're right. It's about being comfortable with being wrong.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0277.wav", "text": "Simple doesn't mean easy. Making something simple often requires more effort than making something complex.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0278.wav", "text": "The stories we tell ourselves about who we are have a bigger impact on our behavior than objective reality does.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0279.wav", "text": "Asking the right question is often more important than having the right answer.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0280.wav", "text": "Progress isn't always visible. Some of the most important changes happen slowly, beneath the surface.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0281.wav", "text": "Running is one of those activities that gets easier the more you do it, but the first few weeks are brutal.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0282.wav", "text": "The difference between a good athlete and a great one is usually mental, not physical.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0283.wav", "text": "Stretching after exercise is just as important as the exercise itself. Most people skip it though.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0284.wav", "text": "Swimming works every major muscle group in your body. It's also one of the lowest impact exercises you can do.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0285.wav", "text": "Professional athletes spend way more time training than competing. The game is just the tip of the iceberg.", "ref_audio": "./ref.wav"}
@@ -296,11 +284,9 @@
 {"audio": "./audio/clip_0296.wav", "text": "Dogs have about three hundred million scent receptors in their noses, compared to about six million in humans.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0297.wav", "text": "Crows can recognize individual human faces and will remember if someone treated them well or badly.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0298.wav", "text": "The mantis shrimp can see colors that humans can't even imagine. They have sixteen types of color receptors. We have three.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0299.wav", "text": "Penguins propose to their partners with a pebble. If the other penguin accepts it, they become a pair.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0300.wav", "text": "Tardigrades can survive in the vacuum of space, extreme radiation, and temperatures close to absolute zero.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0301.wav", "text": "The average person walks about a hundred thousand miles in their lifetime. That's roughly four trips around the Earth.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0302.wav", "text": "Bananas are technically berries, but strawberries aren't. Botanical classifications don't always match common sense.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0303.wav", "text": "The shortest war in history lasted thirty eight minutes. It was between Britain and Zanzibar in eighteen ninety six.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0304.wav", "text": "There are more possible chess games than atoms in the observable universe.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0305.wav", "text": "Honey bees must visit about two million flowers to make one pound of honey.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0306.wav", "text": "A cloud can weigh more than a million pounds. They float because the water droplets are spread over a huge area.", "ref_audio": "./ref.wav"}
@@ -322,14 +308,12 @@
 {"audio": "./audio/clip_0322.wav", "text": "Oh come on, that's not even close to what happened.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0323.wav", "text": "Sure, but have you considered the other side of it?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0324.wav", "text": "That's the kind of thing that sounds crazy until you try it.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0325.wav", "text": "Honestly? I have no idea. But I know someone who might.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0326.wav", "text": "There's something about the first warm day of spring that makes everyone a little bit happier.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0327.wav", "text": "Snow has a way of making everything quiet. The flakes absorb sound, so the world literally gets softer.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0328.wav", "text": "Thunderstorms are terrifying and beautiful at the same time. The power of nature is hard to ignore.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0329.wav", "text": "The best kind of weather is the kind where you don't have to think about what to wear.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0330.wav", "text": "Wind chill makes cold temperatures feel even colder because it strips heat from your skin faster.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0331.wav", "text": "Some people love the rain. Others hate it. Very few people feel neutral about it.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0332.wav", "text": "Fog is basically a cloud that touched the ground. It forms when air cools below its dew point.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0333.wav", "text": "Summer evenings that stay warm late into the night are one of life's simple pleasures.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0334.wav", "text": "The longest day of the year happens in June in the northern hemisphere. After that, the days slowly get shorter.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0335.wav", "text": "Rainbows are actually full circles, but we can only see a semicircle because the ground gets in the way.", "ref_audio": "./ref.wav"}
@@ -380,7 +364,6 @@
 {"audio": "./audio/clip_0380.wav", "text": "Sounds about right.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0381.wav", "text": "Can't argue with that.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0382.wav", "text": "Point taken.", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0383.wav", "text": "Message received.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0384.wav", "text": "Consider it done.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0385.wav", "text": "On it.", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0386.wav", "text": "Oh my god, it actually works! I can't believe we pulled that off!", "ref_audio": "./ref.wav"}
@@ -397,7 +380,6 @@
 {"audio": "./audio/clip_0397.wav", "text": "This is critical! The production database is not responding!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0398.wav", "text": "Something is very wrong here. Look at these error rates!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0399.wav", "text": "We're losing data! Every second counts right now!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0400.wav", "text": "Drop everything, this is an emergency! The system is on fire!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0401.wav", "text": "No no no, that's the wrong one! Stop the deployment!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0402.wav", "text": "Are you kidding me? It broke again? We just fixed this yesterday!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0403.wav", "text": "I don't understand how this keeps happening! We tested it a hundred times!", "ref_audio": "./ref.wav"}
@@ -425,10 +407,8 @@
 {"audio": "./audio/clip_0425.wav", "text": "I refuse to accept that answer! There has to be a better way!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0426.wav", "text": "Oh thank goodness! I was so worried that wasn't going to work!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0427.wav", "text": "You just saved us! Seriously, you have no idea how close we were to disaster!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0428.wav", "text": "Finally! After weeks of trying, it's actually working perfectly!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0429.wav", "text": "I could cry right now, I'm so relieved! The pressure was killing me!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0430.wav", "text": "Thank you so much! I genuinely don't know what we would have done without you!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0431.wav", "text": "Are you seeing this? The whole thing just clicked into place!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0432.wav", "text": "I knew it! I knew we were onto something big here!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0433.wav", "text": "This is hands down the coolest thing I've ever built!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0434.wav", "text": "Oh my god, the speed! It's blazing fast now!", "ref_audio": "./ref.wav"}
@@ -436,16 +416,13 @@
 {"audio": "./audio/clip_0436.wav", "text": "Shut up! No way that's real! Show me again!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0437.wav", "text": "Everything is falling into place! This is our moment!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0438.wav", "text": "I literally screamed when I saw the results, they're insane!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0439.wav", "text": "Best day ever! Nothing can bring me down right now!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0440.wav", "text": "Get everyone on a call right now, we have a major incident!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0441.wav", "text": "The whole cluster is down! All of it, every single node!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0442.wav", "text": "We've got maybe two minutes before this hits production!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0443.wav", "text": "Someone accidentally deleted the main branch! Is there a backup?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0444.wav", "text": "Stop everything! We just pushed credentials to a public repo!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0445.wav", "text": "Oh god, the billing alert just fired! We're hemorrhaging money!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0446.wav", "text": "The load balancer is routing everything to a dead server!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0447.wav", "text": "Wake up the team! This can't wait until morning!", "ref_audio": "./ref.wav"}
-{"audio": "./audio/clip_0448.wav", "text": "I don't care what time it is, fix it now or we lose everything!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0449.wav", "text": "Mayday mayday! The deployment is eating our data!", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0450.wav", "text": "I've explained this five times already! Why is nobody listening?", "ref_audio": "./ref.wav"}
 {"audio": "./audio/clip_0451.wav", "text": "This is unacceptable! We promised this would be done last week!", "ref_audio": "./ref.wav"}
