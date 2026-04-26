@@ -1,9 +1,15 @@
-mlx-audio>=0.4.1
-numpy==1.26.4
-torch==2.6.0
-torchaudio==2.6.0
-scipy>=1.17
-soundfile>=0.12
-clearvoice>=0.1.2
-DeepFilterNet>=0.5.6
-noisereduce>=3.0
+# Inference (Python 3.14, pinned to match ivi's audio-test/.venv-tts-bench)
+mlx==0.31.1
+mlx-lm==0.31.1
+mlx-audio==0.4.2
+numpy==2.4.4
+scipy==1.17.1
+soundfile==0.13.1
+
+# Enhancement pipeline (optional — only needed for training data prep, not inference)
+# These need torch which may require different pinning on 3.14
+# clearvoice>=0.1.2
+# DeepFilterNet>=0.5.6
+# noisereduce>=3.0
+# torch==2.11.0
+# torchaudio==2.6.0

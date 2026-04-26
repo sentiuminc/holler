@@ -27,11 +27,12 @@ from pathlib import Path
 
 import numpy as np
 import mlx.core as mx
+# from scipy.signal import sosfilt, sosfilt_zi  # uncomment with de-ess filter
 from mlx_audio.tts import load
 from mlx_lm.sample_utils import categorical_sampling
 
 DEFAULT_CHECKPOINT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  "checkpoints", "quant-experiment", "affine-6bit-g64")
+                                  "checkpoints", "katie-v8-epoch-1.2-6bit")
 DEFAULT_PORT = 8100
 CHECKPOINT = DEFAULT_CHECKPOINT
 PORT = DEFAULT_PORT
@@ -47,12 +48,31 @@ DEFAULT_CODEBOOKS = 12
 CARRYOVER_PAUSE_MIN_MS = 150
 CARRYOVER_PAUSE_MAX_MS = 250
 
+# TODO: Dynamic de-esser for 2-6kHz ear fatigue reduction.
+# Static EQ (-5dB notch at 3kHz) was tested and works but is too crude —
+# cuts presence even when it's fine, and pops at sentence boundaries due
+# to filter state reset. Need a proper dynamic de-esser that only attenuates
+# when 2-6kHz energy exceeds a threshold (like a sidechain compressor on
+# the harshness band). Must work per-chunk in streaming with carried state.
+
 model = None
 suppress_indices_cache = None
 zero_token_cache = None
 
+# ---------------------------------------------------------------------------
+# MLX Worker — all MLX calls run on this single long-lived thread.
+# HTTP request threads post work via inference_queue, read results from
+# per-request response queues.  This avoids the fatal crash caused by MLX
+# thread-local CompilerCache destructors firing during pthread_exit on
+# short-lived ThreadingServer request threads (mlx#2086, mlx#2133).
+# ---------------------------------------------------------------------------
+import queue as _queue
 
-def load_model():
+inference_queue = _queue.Queue()
+
+
+def _mlx_worker():
+    """Permanent MLX owner thread. Processes requests forever."""
     global model, suppress_indices_cache, zero_token_cache
 
     print(f"[holler] Loading model from {CHECKPOINT}...", flush=True)
@@ -74,6 +94,54 @@ def load_model():
         pass
 
     print(f"[holler] Ready in {time.time()-t0:.1f}s — http://localhost:{PORT}", flush=True)
+
+    while True:
+        try:
+            item = inference_queue.get(timeout=45)
+        except _queue.Empty:
+            if time.time() - last_request_time > 30:
+                try:
+                    for _ in generate_audio(model, "Stay gold.", max_tokens=20):
+                        pass
+                except Exception:
+                    pass
+            continue
+
+        response_q, cancel_event, kwargs = item
+        try:
+            for audio_chunk in generate_audio(model, **kwargs):
+                if cancel_event.is_set():
+                    break
+                if len(audio_chunk) > 0:
+                    response_q.put(audio_chunk)
+        except Exception as e:
+            response_q.put(e)
+        finally:
+            response_q.put(None)
+
+
+_worker_ready = threading.Event()
+
+
+def load_model():
+    """Start the MLX worker thread and wait for it to be ready."""
+    def _run():
+        _mlx_worker()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    # Wait for the worker to finish loading by sending a probe request
+    probe_q = _queue.Queue()
+    probe_cancel = threading.Event()
+    inference_queue.put((probe_q, probe_cancel, {
+        "text": "Ready.", "voice": DEFAULT_VOICE, "max_tokens": 20
+    }))
+    while True:
+        chunk = probe_q.get()
+        if chunk is None:
+            break
+    _worker_ready.set()
 
 
 def _has_speech(chunk):
@@ -388,7 +456,6 @@ def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6
     print(f"[holler] All retries failed | {text}", flush=True)
 
 
-generate_lock = threading.Lock()
 last_request_time = time.time()
 
 
@@ -447,10 +514,18 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
 
             t0 = time.time()
             all_audio = []
-            with generate_lock:
-                for audio_np in generate_audio(model, text, voice=voice, temperature=temperature):
-                    if len(audio_np) > 0:
-                        all_audio.append(audio_np)
+            response_q = _queue.Queue()
+            cancel_event = threading.Event()
+            inference_queue.put((response_q, cancel_event, {
+                "text": text, "voice": voice, "temperature": temperature
+            }))
+            while True:
+                chunk = response_q.get()
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    break
+                all_audio.append(chunk)
 
             if all_audio:
                 audio = np.concatenate(all_audio)
@@ -552,26 +627,34 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         total_samples = 0
         n_chunks = 0
 
-        with generate_lock:
-            try:
-                for audio_chunk in generate_audio(
-                    model, text, voice=voice, temperature=temperature,
-                    top_k=top_k, n_codebooks=n_codebooks,
-                    reset_decoder=not continue_prosody
-                ):
-                    if len(audio_chunk) > 0:
-                        if ttfa is None:
-                            ttfa = (time.time() - t0) * 1000
+        response_q = _queue.Queue()
+        cancel_event = threading.Event()
+        inference_queue.put((response_q, cancel_event, {
+            "text": text, "voice": voice, "temperature": temperature,
+            "top_k": top_k, "n_codebooks": n_codebooks,
+            "reset_decoder": not continue_prosody
+        }))
 
-                        raw = audio_chunk.tobytes()
-                        self.wfile.write(f"{len(raw):x}\r\n".encode())
-                        self.wfile.write(raw)
-                        self.wfile.write(b"\r\n")
-                        self.wfile.flush()
-                        total_samples += len(audio_chunk)
-                        n_chunks += 1
-            except BrokenPipeError:
-                pass
+        try:
+            while True:
+                chunk = response_q.get()
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    break
+
+                if ttfa is None:
+                    ttfa = (time.time() - t0) * 1000
+
+                raw = chunk.tobytes()
+                self.wfile.write(f"{len(raw):x}\r\n".encode())
+                self.wfile.write(raw)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                total_samples += len(chunk)
+                n_chunks += 1
+        except BrokenPipeError:
+            cancel_event.set()
 
         try:
             self.wfile.write(b"0\r\n\r\n")
@@ -602,12 +685,18 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
             t0 = time.time()
             total_samples = 0
             ttfa = None
-            with generate_lock:
-                for audio_np in generate_audio(model, text):
-                    if len(audio_np) > 0:
-                        if ttfa is None:
-                            ttfa = (time.time() - t0) * 1000
-                        total_samples += len(audio_np)
+            response_q = _queue.Queue()
+            cancel_event = threading.Event()
+            inference_queue.put((response_q, cancel_event, {"text": text}))
+            while True:
+                chunk = response_q.get()
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    break
+                if ttfa is None:
+                    ttfa = (time.time() - t0) * 1000
+                total_samples += len(chunk)
             total_ms = (time.time() - t0) * 1000
             audio_s = total_samples / SAMPLE_RATE
             rtf = (total_ms / 1000) / audio_s if audio_s > 0 else 999
@@ -642,18 +731,7 @@ class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def keepalive():
-    def _loop():
-        while True:
-            time.sleep(45)
-            if time.time() - last_request_time > 30:
-                try:
-                    with generate_lock:
-                        for _ in generate_audio(model, "Stay gold.", max_tokens=20):
-                            pass
-                except Exception:
-                    pass
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
+    pass
 
 
 def main():
@@ -670,7 +748,6 @@ def main():
     PORT = args.port
 
     load_model()
-    keepalive()
     server = ThreadingServer(("0.0.0.0", PORT), TTSHandler)
     print(f"[holler] Server running on http://localhost:{PORT}", flush=True)
     print(f"[holler] POST /tts — streaming float32 PCM", flush=True)
