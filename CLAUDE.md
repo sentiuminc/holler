@@ -52,18 +52,18 @@ holler/
 │   ├── katie/             — Female voice (Cartesia-sourced, slot 3000)
 │   │   ├── ref.wav        — 10s reference audio
 │   │   ├── cartesia_original.wav — original source
-│   │   └── training-data/ — 385 clips + train.jsonl
-│   │       ├── audio/           — enhanced clips (ClearVoice→DeepFilter→E)
-│   │       └── audio-original/  — pre-enhancement backups
+│   │   └── training-data/ — 475 clips + train.jsonl + train_curated.jsonl (452)
+│   │       ├── audio/           — enhanced clips (new pipeline: DeepFilter→LUFS→deess→presence)
+│   │       ├── curation.json    — Tinder decisions (452 keep, 23 reject)
+│   │       └── train_curated.jsonl — TRAINING FILE (452 entries)
 │   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
-│       ├── ref.wav
+│       ├── ref.wav              — original VoiceDesign reference
+│       ├── ref_cleaned.wav      — DeepFilter + LUFS normalized
 │       ├── candidates/    — 28 voice design candidates + index.txt
-│       └── training-data/ — 452 curated clips (v2) + train_curated.jsonl
-│           ├── audio/           — enhanced clips (ClearVoice→DeepFilter→RecipeE→presence)
-│           ├── audio-original/  — pre-enhancement backups (v1 originals)
-│           ├── audio-enhanced-backup/ — pre-enhancement of emotional batch
-│           ├── curation.json    — Tinder decisions (452 keep, 23 reject)
-│           └── train_curated.jsonl — TRAINING FILE (452 entries)
+│       └── training-data/ — 385 clips (needs regeneration at temp 0.85)
+│           ├── audio/           — enhanced clips (new pipeline)
+│           ├── audio-original/  — raw 1.7B cloner output
+│           └── train.jsonl      — full manifest (not yet curated)
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
 │   ├── katie-v6-4bit/     — 960MB 4-bit affine (previous pick)
@@ -229,52 +229,114 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
-## Training Data Pipeline (updated 2026-04-25)
+## Training Data Pipeline (updated 2026-04-26)
 
-### Step 0: Enhance reference audio FIRST
+Full pipeline from voice design to enhanced training clips. Script: `tools/enhance_clips.py`.
 
-Before cloning training data, run the reference audio through the enhancement pipeline. This is critical — source audio quality (especially from services like Cartesia) often has noise, peaks, and artifacts that the 1.7B model will faithfully clone into every training clip. A/B test the enhanced ref vs original and pick the better one. Enhanced ref saved alongside original (e.g. `ref_enhanced.wav`).
+### Step 0: Reference audio
+
+Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -22 LUFS. **Do NOT** cascade enhancers (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
 ### Step 1: Generate clips via 1.7B voice cloning
 
-Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit` with the (enhanced) reference audio. Temperature 0.9 recommended (1.0 causes clipping in ~30% of clips). Append 1s silence for cutoff detection (will be trimmed).
+Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit). Temperature **0.85** (0.6 produces monotone — F0 range 168 Hz vs 235 Hz at 0.85). Pass `ref_audio=` and `ref_text=` parameters. Append 1s silence for cutoff detection.
 
 ### Step 2: Trim silence
 
-100ms lead + 100ms trail padding, 20ms fade-out. Reject clips with abrupt cutoffs (peak > 0.03 in last 50ms before the 1s silence pad). Auto-retry once on cutoff. Script: `tools/trim_and_merge.py`.
+100ms lead + 100ms trail padding, 20ms fade-out. Reject clips with abrupt cutoffs. Script: `tools/trim_and_merge.py`.
 
 ### Step 3: Enhance clips
 
-Peak normalize clippers only (>= 0.999 peak → scale to -1dB), then run through enhancement pipeline. Script: `tools/enhance_clips.py`.
+```bash
+python tools/enhance_clips.py --voice joe --gender male
+python tools/enhance_clips.py --voice katie --gender female
+```
 
-### Step 4: Curate via Clip Tinder
+Reads `audio-original/`, writes `audio/`. Four stages:
 
-`tools/curate_clips.py --voice <name>` — swipe through clips, keep/reject/maybe. Regenerate rejects with `tools/regenerate_rejects.py`.
+### Enhancement Pipeline: DeepFilter → LUFS → De-ess → Presence
 
-### Enhancement Pipeline: ClearVoice → DeepFilterNet3 → Recipe E
+1. **DeepFilterNet3** (single pass) — 2.1M-param neural denoiser. SNR gating: does nothing on already-clean audio (>+20dB SNR). Resample 24k→48k→24k.
+2. **LUFS normalize** — target -22 LUFS integrated, peak ceiling -3 dBFS. Linear gain only, no compression.
+3. **Spectral de-esser** — STFT-based per-bin adaptive sibilance reduction. Each bin uses its own median as baseline, only reduces peaks above it. Lookahead 8ms.
+4. **Dynamic presence** — STFT-based per-bin adaptive presence lift. Boosts bins proportionally to how far below their median they are. Smooth tanh curve, never pushes bright moments brighter.
 
-Applied to both reference audio and training clips.
+### Tunable Knobs
 
-1. **ClearVoice MossFormer2_SE_48K** — Alibaba's 50M-param speech enhancer. Uses spectral masking (NOT vocoding — preserves voice identity). Outputs at 48kHz, resample back to 24kHz via `signal.resample_poly`.
-2. **DeepFilterNet3** — 2.1M-param neural denoiser. Fine-grained noise removal in 2-6kHz range (ear fatigue zone). Resample 24k→48k→24k via `signal.resample_poly`.
-3. **Recipe E** — 80Hz high-pass filter (scipy butter order 4) + 30% **stationary** spectral denoise (noisereduce). `stationary=True` is critical — without it, noisereduce is too aggressive and "boxes in" the sound.
-4. **Peak normalize clippers only** — only scale down clips where peak >= 0.999. Don't normalize everything (reduces overall volume by ~1dB for no reason).
+**LUFS normalize:**
+| Knob | Default | What it does |
+|------|---------|-------------|
+| `target_lufs` | -22.0 | Perceived loudness target. -25 to -22 matches CustomVoice built-ins. |
+| `peak_ceiling` | -3.0 dBFS | Maximum true peak. Prevents clipping. |
 
-**Why this order:** ClearVoice does broad spectral cleanup (understands speech structure), DeepFilterNet does fine-grained residual noise, Recipe E catches low-frequency rumble. Each pass is complementary. Reversed order (DF→CV→E) sounds worse.
+**Spectral de-esser (gender presets):**
+| Knob | Male | Female | What it does |
+|------|------|--------|-------------|
+| `deess_low` | 4500 Hz | 6000 Hz | Bottom of sibilance detection band |
+| `deess_high` | 7000 Hz | 9000 Hz | Top of sibilance detection band |
+| `deess_threshold` | -6.0 dB | -4.0 dB | How far above median triggers reduction. Lower = more aggressive. |
+| `deess_max_reduction` | 8.0 dB | 6.0 dB | Maximum gain cut per bin |
+| `ratio` | 4.0 | 4.0 | Compression ratio (4:1) |
+| `lookahead_ms` | 8.0 | 8.0 | Catches sibilant onsets before they pass |
+| `smoothing_frames` | 3 | 3 | Temporal smoothing to avoid jitter |
 
-**What was tested and rejected:** Resemble Enhance (needs deepspeed, destroys speaker similarity), VoiceFixer (checkpoint corrupt, uses vocoder), AudioSR (ancient deps), AP-BWE (manual weight download), spectral denoise alone at 80-100% (hollows voice), DSP with normalization+trim+de-essing (too much).
+**Dynamic presence:**
+| Knob | Default | What it does |
+|------|---------|-------------|
+| `low_hz` | 3500 | Bottom of presence range |
+| `high_hz` | 8000 | Top of presence range |
+| `max_boost_db` | 2.5 | Maximum lift per bin. Higher = more presence fill. |
+| `sensitivity` | 1.0 | How aggressively to fill deficits. 0.5 = gentle, 2.0 = aggressive. |
+| `smoothing_frames` | 5 | Temporal smoothing |
 
-**Performance:** ~0.5-0.7s/clip on M1 Pro. All 770 clips in ~8 minutes.
+### What was tested and rejected (2026-04-26)
 
-**Result:** Cleaner audio, reduced 2-6kHz noise that causes ear fatigue on AirPods, voice character fully preserved. "Light years better than Cartesia" on same sentences.
+**Old 3-stage cascade (ClearVoice → DeepFilter → Recipe E → presence boost):**
+- ClearVoice adds spectral masking artifacts in silence (+2-4 dB noise in silent portions)
+- noisereduce profiles wrong noise after ClearVoice, applies wrong mask
+- +3dB presence boost at 3kHz doubled presence (12.7% → 25.9%), pushed harshness above ear-pain threshold
+- 80Hz HPF unnecessary for TTS audio (no mic rumble)
+- **Cascading speech enhancers is an anti-pattern for clean TTS audio.** Paper: "Amplifying Artifacts with Speech Enhancement" (arXiv:2506.11542).
 
-**Dependencies:** holler `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, clearvoice, deepfilternet, noisereduce, scipy). Note: torchaudio must be 2.6 (not newer) for DeepFilterNet compatibility.
+**Proven by measurement:** Same 10 clips through old vs new pipeline — sibilance dropped 73% (3.7% → 1.0%), spectral tilt normalized 2 dB warmer, LUFS consistency improved 3.5x.
+
+### Step 4: Quality gate + Curate
+
+Automated: reject DNSMOS OVRL <3.0, peak >-1, duration <0.5s, silence >50%. Flag HNR <10, sibilance >5%.
+Human: `tools/curate_clips.py --voice <name>` — Tinder-style swipe. Target ~450 curated clips.
+
+### Audio Quality Targets (from CustomVoice analysis)
+
+Reference voice: Serena (built-in CustomVoice). Derived from comprehensive analysis + ear testing at 90% AirPods Pro 3 volume.
+
+| Metric | Target | Serena | Vivian (hurts) |
+|--------|--------|--------|----------------|
+| Peak dBFS | -8 to -4 | -10.2 | -3.1 |
+| LUFS | -25 to -22 | -25.7 | -20.0 |
+| Harshness 2-4kHz | < 2% | 1.4% | 5.7% |
+| Sibilance 4-10kHz | < 3% | 2.8% | 3.6% |
+| Presence 1-5kHz | 8-20% | 15.4% | 35.4% |
+| Tilt dB/oct | -5 to -7 | -4.9 | -5.2 |
+| HNR | > 14 dB | 14.8 | 13.2 |
+| F0 range | > 200 Hz | 224 | 339 |
+
+**Key insight:** Harshness and presence predict ear pain better than volume. Aiden peaks at -3.6 dBFS (hot) but doesn't hurt (1.6% harshness). Vivian peaks at -3.1 (similar) but hurts (5.7% harshness).
+
+### Analysis Tools
+
+- `tools/analyze_voice_quality.py` — 20+ metrics: levels, spectrum, voice quality (Praat), DNSMOS perceptual scores
+- `tools/noise_profile.py` — before/after noise comparison by frequency band
+- `tools/deess.py` — standalone de-esser (also integrated in enhance_clips.py)
+
+### Dependencies
+
+Enhancement venv: `.venv-enhance-audio/` (Python 3.13, torch 2.6, torchaudio 2.6, deepfilternet, parselmouth, torchmetrics, onnxruntime, clearvoice, noisereduce, scipy, soundfile).
 
 ## Key Technical Details
 
 - Qwen3-TTS `codec_embedding.weight` has 3072 slots (1024-dim each). Slots 0-2047 are active codec tokens (DON'T overwrite). 3000-3071 is the 72-slot custom voice region.
 - Fine-tuning writes a speaker embedding to a slot and co-trains the full model. At inference, voice name → config lookup → slot → embedding injection at codec position 6.
-- Training data: ~385 clips per voice, voice-cloned from a reference through Qwen3-TTS-1.7B-Base. 24kHz mono WAV with 1s trailing silence.
+- Training data: ~450 clips per voice, voice-cloned from a reference through Qwen3-TTS-1.7B-Base-bf16. 24kHz mono WAV. Temperature 0.85 for expressiveness.
 - Multi-voice: same recipe, but JSONL has per-sample `voice_name` field, and training script tracks embeddings per voice. See `training/sft_12hz_multivoice.py`.
 - Voice name in v6 config is `katie` at slot 3000 (nested under `talker_config.spk_id`).
 
