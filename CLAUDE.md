@@ -12,6 +12,8 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Origin:** Started as the voice component of [ivi](https://ivi.computer), a macOS notch AI assistant by Sentium. We open-sourced it because Qwen3-TTS is SOTA for local inference but ships with only 2 mediocre English voices — and nothing else fills that gap.
 
+**Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
+
 ## Current State (2026-04-26)
 
 - **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only. Now with `--save_every_steps` for fractional epoch checkpoints.
@@ -78,8 +80,8 @@ holler/
 │   ├── benchmark-katie-v6-{bf16,4bit}/ — older benchmark clips
 │   ├── v6-mlx/, v6-pytorch/, v5/   — earlier samples
 │   └── v7-{mlx,pytorch}-{katie,joe}/ — multi-voice samples
-├── logs/
-│   ├── sessions/          — Session logs (the full journey)
+├── logs/                  — DEPRECATED: session logs now live in ivi repo at ivi/logs/
+│   ├── sessions/          — Old session logs (moved to ivi/logs/)
 │   └── runs/              — Raw training/inference logs
 └── docs/
     ├── ivi-session-notes.md        — Full debugging journey + v7 addendum
