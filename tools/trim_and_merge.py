@@ -7,7 +7,7 @@ Usage:
 
 Steps:
   1. Process new emotional clips from ~/Downloads/katie-emotional-t1/:
-     - Reject clips with abrupt cutoffs (energy in last 50ms before 1s silence pad)
+     - Reject clips with abrupt cutoffs (energy in last 50ms of audio)
      - Trim to 100ms lead + 100ms trail + 20ms fade-out
      - Copy into Katie's training-data/audio/ folder
      - Append to train.jsonl
@@ -29,7 +29,7 @@ PAD = int(SR * 0.1)        # 100ms padding
 FADE = int(SR * 0.02)      # 20ms fade-out
 THRESHOLD = 0.001           # RMS threshold for silence detection
 CUTOFF_THRESHOLD = 0.03     # peak amplitude threshold for abrupt cutoff detection
-CUTOFF_WINDOW = int(SR * 0.05)  # 50ms before the 1s silence pad
+CUTOFF_WINDOW = int(SR * 0.05)  # 50ms window at end of audio
 
 KATIE_DIR = Path(__file__).parent.parent / "voices" / "katie" / "training-data"
 EMOTIONAL_DIR = Path(os.path.expanduser("~/Downloads/katie-emotional-t1"))
@@ -68,16 +68,15 @@ def trim_clip(audio):
 
 
 def has_abrupt_cutoff(audio):
-    """Check if audio has energy in the last 50ms before the appended 1s silence.
+    """Check if audio ends abruptly (high energy in last 50ms).
 
-    The generation scripts append 24000 samples (1s) of zeros.
-    We check the 50ms window right before that silence starts.
+    If the model cut off mid-speech, there will be significant energy
+    at the very end of the audio with no natural fade.
     """
-    silence_start = len(audio) - SR  # 1s from end
-    if silence_start < CUTOFF_WINDOW:
+    if len(audio) < CUTOFF_WINDOW:
         return False, 0.0
 
-    check_region = audio[silence_start - CUTOFF_WINDOW:silence_start]
+    check_region = audio[-CUTOFF_WINDOW:]
     peak = np.max(np.abs(check_region))
     return peak > CUTOFF_THRESHOLD, peak
 

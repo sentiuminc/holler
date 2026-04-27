@@ -37,7 +37,7 @@ DEFAULT_PORT = 8100
 CHECKPOINT = DEFAULT_CHECKPOINT
 PORT = DEFAULT_PORT
 SAMPLE_RATE = 24000
-DEFAULT_VOICE = "katie"
+DEFAULT_VOICE = "nora"
 DEFAULT_TEMP = 0.6
 DEFAULT_TOP_K = 50
 MAX_TOKENS = 500
@@ -58,6 +58,7 @@ CARRYOVER_PAUSE_MAX_MS = 250
 model = None
 suppress_indices_cache = None
 zero_token_cache = None
+available_voices = [DEFAULT_VOICE]
 
 # ---------------------------------------------------------------------------
 # MLX Worker — all MLX calls run on this single long-lived thread.
@@ -80,7 +81,13 @@ def _mlx_worker():
     model = load(CHECKPOINT)
     mx.set_cache_limit(2 * 1024 * 1024 * 1024)
 
+    global available_voices, DEFAULT_VOICE
     config = model.config.talker_config
+    spk_id = getattr(config, 'spk_id', None)
+    if spk_id and isinstance(spk_id, dict):
+        available_voices = sorted(spk_id.keys())
+        DEFAULT_VOICE = available_voices[0]
+    print(f"[holler] Voices: {available_voices} (default: {DEFAULT_VOICE})", flush=True)
     eos = config.codec_eos_token_id
     suppress_indices_cache = mx.array(
         [i for i in range(config.vocab_size - 1024, config.vocab_size) if i != eos],
@@ -563,7 +570,7 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
             self._run_benchmark()
 
         elif self.path == "/health":
-            body = json.dumps({"status": "ok", "model": os.path.basename(CHECKPOINT)}).encode()
+            body = json.dumps({"status": "ok", "model": os.path.basename(CHECKPOINT), "voices": available_voices}).encode()
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", "application/json")

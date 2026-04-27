@@ -8,7 +8,7 @@
 
 ## US Northeast
 - **Vinnie** — fast Jersey/Brooklyn, talks with his hands
-- **Nora** — sharp Boston, no-nonsense, drops her R's
+- **Nora** — clear, deep female voice, direct and natural
 
 ## US West
 - **Sage** — mellow California, surfer-adjacent but smart

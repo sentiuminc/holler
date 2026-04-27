@@ -121,9 +121,8 @@
 </div>
 
 <div class="controls">
-  <label><input type="checkbox" id="chk-continue" checked> Carry-over prosody</label>
-  <label><input type="checkbox" id="chk-auto-split" checked> Auto-split sentences</label>
-  <label>Voice: <input type="text" id="inp-voice" value="katie"></label>
+  <label><input type="checkbox" id="chk-split-carry" checked> Split &amp; carry-over</label>
+  <label>Voice: <select id="inp-voice"><option>loading...</option></select></label>
   <label>Temp: <select id="sel-temp">
     <option value="0.4">0.4</option>
     <option value="0.5">0.5</option>
@@ -253,8 +252,15 @@ async function checkHealth() {
   try {
     const r = await fetch(`${BASE}/health`);
     if (r.ok) {
+      const data = await r.json();
+      if (data.voices) {
+        const sel = document.getElementById('inp-voice');
+        const cur = sel.value;
+        sel.innerHTML = data.voices.map(v => `<option value="${v}">${v}</option>`).join('');
+        if (cur && data.voices.includes(cur)) sel.value = cur;
+      }
       setStatus('ready', 'Server ready');
-      log('Server connected', 'timing');
+      log('Server connected — voices: ' + (data.voices || []).join(', '), 'timing');
       return true;
     }
   } catch (e) {}
@@ -267,7 +273,7 @@ async function speakOne(text, continueP) {
   const t0 = performance.now();
   abortCtrl = new AbortController();
 
-  const voice = document.getElementById('inp-voice').value || 'katie';
+  const voice = document.getElementById('inp-voice').value || 'nora';
   const temp = parseFloat(document.getElementById('sel-temp').value);
   log(`POST /tts  voice=${voice} continue=${continueP}  "${text.slice(0, 70)}${text.length > 70 ? '...' : ''}"`, 'info');
 
@@ -364,9 +370,8 @@ async function speak() {
   const rawText = document.getElementById('text').value.trim();
   if (!rawText) return;
 
-  const autoSplit = document.getElementById('chk-auto-split').checked;
-  const carryOver = document.getElementById('chk-continue').checked;
-  const sentences = autoSplit ? splitSentences(rawText) : [rawText];
+  const splitCarry = document.getElementById('chk-split-carry').checked;
+  const sentences = splitCarry ? splitSentences(rawText) : [rawText];
 
   document.getElementById('btn-speak').disabled = true;
   document.getElementById('btn-stop').disabled = false;
@@ -388,7 +393,7 @@ async function speak() {
     for (let i = 0; i < sentences.length; i++) {
       if (!isPlaying) break;
 
-      const cont = carryOver && i > 0;
+      const cont = splitCarry && i > 0;
       setSentenceStatus(i, 'generating...', false);
 
       const result = await speakOne(sentences[i], cont);
@@ -419,9 +424,13 @@ async function speak() {
     log(`total: ${sentences.length} sentences, ${totalDur.toFixed(2)}s audio, ${wallMs.toFixed(0)}ms wall, RTF=${rtf.toFixed(3)}`, 'timing');
   }
 
-  setStatus('ready', 'Ready');
+  const remainingAudioMs = Math.max(0, (nextPlayTime - audioCtx?.currentTime || 0)) * 1000;
+  if (remainingAudioMs > 100) {
+    setStatus('speaking', `Playing (${(remainingAudioMs/1000).toFixed(1)}s left)...`);
+  } else {
+    setStatus('ready', 'Ready');
+  }
   document.getElementById('btn-speak').disabled = false;
-  document.getElementById('btn-stop').disabled = true;
   document.getElementById('btn-dl').disabled = allAudioChunks.length === 0;
   document.getElementById('btn-replay').disabled = allAudioChunks.length === 0;
   isPlaying = false;
@@ -471,7 +480,11 @@ function downloadAudio() {
 function stopAll() {
   isPlaying = false;
   if (abortCtrl) abortCtrl.abort();
-  if (audioCtx) audioCtx.close().then(() => { audioCtx = null; });
+  if (audioCtx) {
+    audioCtx.close().then(() => { audioCtx = null; });
+    audioCtx = null;
+  }
+  nextPlayTime = 0;
   setStatus('ready', 'Stopped');
   document.getElementById('btn-speak').disabled = false;
   document.getElementById('btn-stop').disabled = true;

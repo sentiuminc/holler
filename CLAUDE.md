@@ -88,68 +88,15 @@ holler/
     └── handover-lora-failure.md    — Historical: why LoRA doesn't work
 ```
 
-## The Winning Recipe
+## Training & Quantization
 
-```bash
-# Standard (epoch-only checkpoints)
-python3 sft_12hz_patched.py \
-  --init_model_path /path/to/Qwen3-TTS-12Hz-0.6B-Base \
-  --output_model_path /path/to/output \
-  --train_jsonl /path/to/train_curated.jsonl \
-  --batch_size 2 --lr 1e-7 --num_epochs 2 \
-  --speaker_name katie
+**Read `docs/training-runbook.md` first.** It is the authoritative, complete reference for all training: recipe, multi-voice, GPU runbook, data pipeline, quantization, quality targets, and hard-won lessons. Everything below is a quick summary.
 
-# Fine-grained (fractional epoch checkpoints every 45 steps ≈ 0.2 epochs)
-python3 sft_12hz_patched.py \
-  --init_model_path /path/to/Qwen3-TTS-12Hz-0.6B-Base \
-  --output_model_path /path/to/output \
-  --train_jsonl /path/to/train_curated.jsonl \
-  --batch_size 2 --lr 1e-7 --num_epochs 2 \
-  --speaker_name katie --save_every_steps 45
-```
-
-With 452 clips at batch_size=2: 226 steps/epoch. `--save_every_steps 45` gives checkpoints at ~0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0 epochs. Each checkpoint is a full model copy (~1.7GB bf16), so budget ~17GB disk.
-
-- **lr=1e-7 is critical.** Higher LRs (2e-6, 2e-5) destroy EOS token — model generates until max_new_tokens.
-- **Only patch needed:** Wrap `text_embedding` with `text_projection` on line ~89 of upstream `sft_12hz.py` (fixes 0.6B dimension mismatch). Script: `training/sft_12hz_patched.py`.
-- **Do NOT apply** the "double label shift" fix or "remove sub-codebook loop" fix at this LR — they break training.
-- **Epoch 1 was the pick for v6.** With v8's improved data, sweep 0.6–1.4 to find optimal.
-- **Loss stays at ~12-13.** That's correct. Low loss at higher LR = overfitting, not quality.
-
-## Quantization
-
-Done via **mlx-audio's own converter** (NOT `mlx_lm.convert` — that doesn't support qwen3_tts model type):
-
-```python
-from mlx_audio.convert import convert
-convert(
-    hf_path='checkpoints/katie-v6',
-    mlx_path='checkpoints/quant-experiment/affine-6bit-g64',
-    quantize=True, q_bits=6, q_group_size=64, q_mode='affine',
-)
-```
-
-- Affine quantization: per-group (64 weights) scale + zero-point, weights stored as N-bit integers
-- The converter **selectively keeps critical layers at full precision** (codec_embedding, speaker embeddings, small layers). That's why "4-bit" averages 8.9 bits/weight and "8-bit" averages 11.4 bits/weight.
-- MLX dequantizes on-the-fly in Metal GPU kernels during matmul — no separate unpack step.
-### Quantization Experiment Results (2026-04-24, M1 Pro)
-
-Tested all MLX quantization modes against Katie v6 bf16 source. Script: `inference/experiment_quant_methods.py`.
-
-| Variant | Disk | RAM | TTFA | RTF | Bits/wt | Notes |
-|---------|------|-----|------|-----|---------|-------|
-| **affine 6-bit g64** | **1094M** | **1744M** | **84ms** | **0.67x** | **10.1** | **THE PICK — best voice presence** |
-| affine 4-bit g64 | 960M | 1611M | 77ms | 0.63x | 8.9 | Previous pick. Still good, less presence |
-| affine 4-bit g32 | 994M | 1644M | 77ms | 0.65x | 9.2 | Finer groups, one EOS overshoot |
-| affine 4-bit g128 | 943M | 1594M | 80ms | 0.66x | 8.7 | Coarser groups, slightly slower |
-| nvfp4 | 960M | 1611M | 78ms | 0.65x | 8.9 | Clean, competitive with affine 4-bit |
-| mxfp4 | 943M | 1594M | 82ms | 0.66x | 8.7 | EOS issue on "Okay." (6s generated) |
-| mxfp8 | 1210M | 1861M | 90ms | 0.84x | 11.2 | Worst RTF, TTFA spikes, EOS issues |
-| affine 3-bit g64 | 893M | 1544M | 80ms | 0.64x | 8.3 | BROKEN — all samples clip to 1.0, EOS lost |
-
-**6-bit affine wins on voice quality.** Noticeably more presence and vocal dynamics than 4-bit. Cost: +134MB RAM, +0.04x RTF — negligible for the quality gain. 3-bit is broken. mxfp8 is surprisingly worse than affine 4-bit despite more bits.
-
-**Important:** Use `mx.metal.get_active_memory()` / `mx.metal.get_peak_memory()` for measuring MLX memory — NOT `psutil.Process().memory_info().rss` which gives garbage numbers for MLX workloads.
+- **Recipe:** lr=1e-7, 2 epochs, batch_size=2, bf16. Loss stays ~12-15 (correct).
+- **Single-voice:** `training/sft_12hz_patched.py` — text_projection patch for 0.6B.
+- **Multi-voice:** `training/sft_12hz_multivoice.py` — per-voice JSONL with `voice_name` field, cached embedding injection (bug fixed 2026-04-27).
+- **Quantization:** 6-bit affine g64 via `mlx_audio.convert`. **Must manually copy `speech_tokenizer/model.safetensors` after** (converter bug).
+- **GPU:** Vast.ai, 3090+ ($0.12-0.50/hr), `remote_setup.sh` + `remote_train_multivoice.sh`.
 
 ## Inference Architecture (updated 2026-04-24)
 
@@ -229,223 +176,19 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
-## Training Data Pipeline (updated 2026-04-26)
+## Voice Data Pipeline & GPU Training
 
-Full pipeline from voice design to enhanced training clips. Script: `tools/enhance_clips.py`.
+**All in `docs/training-runbook.md`.** Covers voice design, data generation, enhancement, curation, GPU setup, training, quantization, and all environment gotchas. Read it fully before any training work.
 
-### Step 0: Reference audio
-
-Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -22 LUFS. **Do NOT** cascade enhancers (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
-
-### Step 1: Generate clips via 1.7B voice cloning
-
-Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit). Temperature **0.85** (0.6 produces monotone — F0 range 168 Hz vs 235 Hz at 0.85). Pass `ref_audio=` and `ref_text=` parameters. Append 1s silence for cutoff detection.
-
-### Step 2: Trim silence
-
-100ms lead + 100ms trail padding, 20ms fade-out. Reject clips with abrupt cutoffs. Script: `tools/trim_and_merge.py`.
-
-### Step 3: Enhance clips
-
+Quick reference tools:
 ```bash
-python tools/enhance_clips.py --voice joe --gender male
-python tools/enhance_clips.py --voice katie --gender female
+# Enhance clips
+.venv-enhance-audio/bin/python tools/enhance_clips.py --voice <name> --gender <male|female>
+# Auto-curate (report, then --apply)
+.venv-enhance-audio/bin/python tools/auto_curate.py --voice <name>
+# Analyze quality
+.venv-enhance-audio/bin/python tools/analyze_voice_quality.py --source <dir> --label <name> --n 80
 ```
-
-Reads `audio-original/`, writes `audio/`. Four stages:
-
-### Enhancement Pipeline: Trim → DeepFilter → LUFS → De-ess → Presence
-
-1. **Trim silence** — find speech boundaries (10ms RMS windows, threshold 0.001), keep 100ms padding on each side, 20ms fade-out. Removes the 1s generation padding + any leading silence.
-2. **DeepFilterNet3** (single pass) — 2.1M-param neural denoiser. SNR gating: does nothing on already-clean audio (>+20dB SNR). Resample 24k→48k→24k.
-3. **LUFS normalize** — target -22 LUFS integrated, peak ceiling -3 dBFS. Linear gain only, no compression. Must run AFTER trim so loudness measurement covers speech only.
-4. **Spectral de-esser** — STFT-based per-bin adaptive sibilance reduction. Each bin uses its own median as baseline, only reduces peaks above it. Lookahead 8ms.
-5. **Dynamic presence** — STFT-based per-bin adaptive presence lift. Boosts bins proportionally to how far below their median they are. Smooth tanh curve, never pushes bright moments brighter.
-
-### Tunable Knobs
-
-**LUFS normalize:**
-| Knob | Default | What it does |
-|------|---------|-------------|
-| `target_lufs` | -22.0 | Perceived loudness target. -25 to -22 matches CustomVoice built-ins. |
-| `peak_ceiling` | -3.0 dBFS | Maximum true peak. Prevents clipping. |
-
-**Spectral de-esser (gender presets):**
-| Knob | Male | Female | What it does |
-|------|------|--------|-------------|
-| `deess_low` | 4500 Hz | 6000 Hz | Bottom of sibilance detection band |
-| `deess_high` | 7000 Hz | 9000 Hz | Top of sibilance detection band |
-| `deess_threshold` | -6.0 dB | -4.0 dB | How far above median triggers reduction. Lower = more aggressive. |
-| `deess_max_reduction` | 8.0 dB | 6.0 dB | Maximum gain cut per bin |
-| `ratio` | 4.0 | 4.0 | Compression ratio (4:1) |
-| `lookahead_ms` | 8.0 | 8.0 | Catches sibilant onsets before they pass |
-| `smoothing_frames` | 3 | 3 | Temporal smoothing to avoid jitter |
-
-**Dynamic presence:**
-| Knob | Default | What it does |
-|------|---------|-------------|
-| `low_hz` | 3500 | Bottom of presence range |
-| `high_hz` | 8000 | Top of presence range |
-| `max_boost_db` | 2.5 | Maximum lift per bin. Higher = more presence fill. |
-| `sensitivity` | 1.0 | How aggressively to fill deficits. 0.5 = gentle, 2.0 = aggressive. |
-| `smoothing_frames` | 5 | Temporal smoothing |
-
-### What was tested and rejected (2026-04-26)
-
-**Old 3-stage cascade (ClearVoice → DeepFilter → Recipe E → presence boost):**
-- ClearVoice adds spectral masking artifacts in silence (+2-4 dB noise in silent portions)
-- noisereduce profiles wrong noise after ClearVoice, applies wrong mask
-- +3dB presence boost at 3kHz doubled presence (12.7% → 25.9%), pushed harshness above ear-pain threshold
-- 80Hz HPF unnecessary for TTS audio (no mic rumble)
-- **Cascading speech enhancers is an anti-pattern for clean TTS audio.** Paper: "Amplifying Artifacts with Speech Enhancement" (arXiv:2506.11542).
-
-**Proven by measurement:** Same 10 clips through old vs new pipeline — sibilance dropped 73% (3.7% → 1.0%), spectral tilt normalized 2 dB warmer, LUFS consistency improved 3.5x.
-
-### Step 4: Quality gate + Curate
-
-Automated: reject DNSMOS OVRL <3.0, peak >-1, duration <0.5s, silence >50%. Flag HNR <10, sibilance >5%.
-Human: `tools/curate_clips.py --voice <name>` — Tinder-style swipe. Target ~450 curated clips.
-
-### Audio Quality Targets (from CustomVoice analysis)
-
-Reference voice: Serena (built-in CustomVoice). Derived from comprehensive analysis + ear testing at 90% AirPods Pro 3 volume.
-
-| Metric | Target | Serena | Vivian (hurts) |
-|--------|--------|--------|----------------|
-| Peak dBFS | -8 to -4 | -10.2 | -3.1 |
-| LUFS | -25 to -22 | -25.7 | -20.0 |
-| Harshness 2-4kHz | < 2% | 1.4% | 5.7% |
-| Sibilance 4-10kHz | < 3% | 2.8% | 3.6% |
-| Presence 1-5kHz | 8-20% | 15.4% | 35.4% |
-| Tilt dB/oct | -5 to -7 | -4.9 | -5.2 |
-| HNR | > 14 dB | 14.8 | 13.2 |
-| F0 range | > 200 Hz | 224 | 339 |
-
-**Key insight:** Harshness and presence predict ear pain better than volume. Aiden peaks at -3.6 dBFS (hot) but doesn't hurt (1.6% harshness). Vivian peaks at -3.1 (similar) but hurts (5.7% harshness).
-
-### Analysis Tools
-
-- `tools/analyze_voice_quality.py` — comprehensive 20+ metric voice quality analysis with statistical summary
-- `tools/noise_profile.py` — before/after noise comparison by frequency band
-- `tools/deess.py` — standalone de-esser (also integrated in enhance_clips.py)
-
-**Usage:**
-```bash
-# Analyze a directory of clips (samples N random clips)
-python tools/analyze_voice_quality.py --source voices/joe/training-data/audio --label "joe-v1" --n 80
-
-# Export to JSON for comparison
-python tools/analyze_voice_quality.py --source <dir> --label "name" --n 80 --json output.json
-
-# Compare two sets
-python tools/analyze_voice_quality.py --source <dir1> --label "before" --n 50
-python tools/analyze_voice_quality.py --source <dir2> --label "after" --n 50
-```
-
-**Metrics reported:** peak_db, rms_db, crest_db, lufs, dc_offset | centroid_hz, harsh_2_4k, sib_4_10k, presence_1_5k, low_80_300, air_10k, tilt_db_oct, flatness, rolloff_hz | silence_ratio, dyn_range_db | f0_mean/std/range, voiced_ratio, jitter_pct, shimmer_pct, hnr_db, f1/f2/f3_hz | dnsmos_sig/bak/ovrl. Uses parselmouth (Praat) for voice quality, torchmetrics for DNSMOS P.835. Requires `.venv-enhance-audio/`.
-
-### Dependencies
-
-Enhancement venv: `.venv-enhance-audio/` (Python 3.13, torch 2.6, torchaudio 2.6, deepfilternet, parselmouth, torchmetrics, onnxruntime, clearvoice, noisereduce, scipy, soundfile).
-
-## Key Technical Details
-
-- Qwen3-TTS `codec_embedding.weight` has 3072 slots (1024-dim each). Slots 0-2047 are active codec tokens (DON'T overwrite). 3000-3071 is the 72-slot custom voice region.
-- Fine-tuning writes a speaker embedding to a slot and co-trains the full model. At inference, voice name → config lookup → slot → embedding injection at codec position 6.
-- Training data: ~450 clips per voice, voice-cloned from a reference through Qwen3-TTS-1.7B-Base-bf16. 24kHz mono WAV. Temperature 0.85 for expressiveness.
-- Multi-voice: same recipe, but JSONL has per-sample `voice_name` field, and training script tracks embeddings per voice. See `training/sft_12hz_multivoice.py`.
-- Voice name in v6 config is `katie` at slot 3000 (nested under `talker_config.spk_id`).
-
-## GPU Training Runbook
-
-**Requirements:** 24GB+ VRAM, CUDA 12.x, bf16 support. A100 SXM4 40GB (~$0.56/hr) or RTX 4090 (~$0.30/hr) on Vast.ai. 80GB disk is enough for single-voice + all checkpoints (~17GB).
-
-**Docker image:** `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`
-
-**SSH key:** `~/.ssh/runpod` works for Vast.ai instances.
-
-### Step 1: Rent + Setup
-
-```bash
-# Rent instance (search for cheapest A100 or 4090)
-vastai search offers 'gpu_name=A100_SXM4 num_gpus=1 rentable=true' -o 'dph_total' --limit 5
-vastai create instance <ID> --image pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel --disk 80
-
-# Wait for running, get SSH details
-vastai show instances
-
-# Upload and run setup script
-scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_setup.sh root@<HOST>:/workspace/
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_setup.sh"
-```
-
-Setup installs into `/workspace/.venv`: torch 2.6, qwen-tts, flash-attn 2.7.3, sox. Downloads 0.6B-Base model + tokenizer. Clones Qwen3-TTS repo. Takes ~5 min.
-
-### Step 2: Upload Training Data
-
-```bash
-# Create remote dir, upload ONLY what's needed
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "mkdir -p /workspace/training-data"
-scp -i ~/.ssh/runpod -P <PORT> -r voices/<voice>/training-data/audio root@<HOST>:/workspace/training-data/
-scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/training-data/ref.wav root@<HOST>:/workspace/training-data/
-scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/training-data/train_curated.jsonl root@<HOST>:/workspace/training-data/
-scp -i ~/.ssh/runpod -P <PORT> holler/training/sft_12hz_patched.py root@<HOST>:/workspace/
-
-# Verify checksums — entire audio folder + JSONL must match local
-# Local (macOS):
-cd voices/<voice>/training-data && find audio -name '*.wav' -type f | sort | xargs md5 -q | md5 -q && md5 -q train_curated.jsonl
-# Remote:
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "cd /workspace/training-data && find audio -name '*.wav' -type f | sort | xargs md5sum | md5sum && md5sum train_curated.jsonl"
-```
-
-Both hashes must match (note: md5 vs md5sum output format differs, compare the hex digest only). Do NOT upload backup dirs (`audio-original/`, `audio-enhanced-backup/`).
-
-### Step 3: Train
-
-```bash
-scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_train.sh root@<HOST>:/workspace/
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_train.sh katie"
-```
-
-`remote_train.sh` handles tokenization, symlinks, and training. ~5 min for 452 clips on A100.
-
-### Step 4: Verify with PyTorch Inference
-
-```bash
-# Upload sweep script, run on GPU
-scp -i ~/.ssh/runpod -P <PORT> holler/inference/test_epoch_sweep.py root@<HOST>:/workspace/
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "/workspace/.venv/bin/python3 /workspace/test_epoch_sweep.py"
-
-# Download samples
-scp -i ~/.ssh/runpod -P <PORT> -r root@<HOST>:/workspace/samples/ ~/Downloads/
-```
-
-Check: voice sounds right, EOS terminates (no runaways), audio lengths proportional to text.
-
-### Step 5: Download Winner + Quantize Locally
-
-```bash
-# Download checkpoint
-scp -i ~/.ssh/runpod -P <PORT> -r root@<HOST>:/workspace/output/checkpoint-epoch-<N>/ holler/checkpoints/<voice>-v<X>/
-
-# Destroy instance
-vastai destroy instance <ID>
-
-# Quantize on Mac (6-bit affine g64)
-python3 -c "
-from mlx_audio.convert import convert
-convert(hf_path='holler/checkpoints/<voice>-v<X>', mlx_path='holler/checkpoints/<voice>-v<X>-6bit', quantize=True, q_bits=6, q_group_size=64, q_mode='affine')
-"
-```
-
-### Hard-Won Environment Lessons
-
-- **flash-attn 2.7.3** works with torch 2.6. Version 2.8.3 does NOT (ABI symbol mismatch).
-- **Never install into system python.** Always venv. `--force-reinstall` on system python cascades into torch version hell.
-- **Install `wheel` + `setuptools` before flash-attn** — it builds from source and needs them.
-- **`sox` must be installed via apt** — `prepare_data.py` needs the binary, not a Python package.
-- **sdpa is a valid fallback** if flash-attn won't build. Training produces identical results. Inference should use flash_attention_2 when available.
-- **JSONL relative paths** (`./audio/`, `./ref.wav`) resolve from cwd. Symlink into the working directory.
 
 ## Community References
 
@@ -459,28 +202,15 @@ convert(hf_path='holler/checkpoints/<voice>-v<X>', mlx_path='holler/checkpoints/
 
 ## Hard-Won Lessons
 
-**Training:**
-- **LR is the dominant knob.** Not loss, not epochs, not community patches.
-- **EOS termination is the diagnostic.** If PyTorch inference hits max_new_tokens on a short sentence, the model is broken.
-- **Always verify with PyTorch inference on GPU first.** It's the ground truth. MLX issues are separable from training issues.
-- **Loss decreasing ≠ quality.** Loss 1.0 produced noise; loss 12.8 produced clean voice.
-- **ref_mel shape is [1, T, 128]** after upstream .transpose(1,2), NOT [1, 128, T]. Pad dim=1 for multi-voice.
-- **Use mlx-audio's converter, not mlx_lm** — mlx_lm doesn't support the qwen3_tts model type.
+Training lessons are in `docs/training-runbook.md`. Inference lessons below (see also `RESEARCH.md` for full 27-experiment log):
 
-**Inference (2026-04-24 research session — see RESEARCH.md):**
-- **mlx-audio's streaming mode is the bottleneck, not the model.** `mx.eval()` + `mx.clear_cache()` per chunk thrashes Metal pipeline. Custom generate loop = 2.3x faster.
-- **Code predictor is 71% of generation time.** 15 sequential 5-layer transformer calls per speech token. The main 28-layer talker is only 24%.
-- **12 of 16 codebooks is the sweet spot.** Codebooks 13-16 are highest-frequency acoustic detail. Skipping them = 18% faster, same EOS reliability (96% vs 98%), negligible quality loss.
-- **Two-phase streaming:** first chunk at 3 tokens (~120ms TTFA), then 40-token chunks. Balances latency vs decode overhead.
-- **`mx.clear_cache()` once after generation, not during.** Prevents memory accumulation without hurting performance.
-- **psutil RSS is garbage for MLX memory** — use `mx.get_active_memory()`.
-- **6-bit affine is the quantization sweet spot for TTS.** Noticeably more vocal presence than 4-bit. 4-bit still good, 3-bit destroys EOS. Novel finding — no prior audio model quant benchmarks exist.
-- **Leading silence is architectural** — all codec LMs do it. Trim at inference or overlap with LLM streaming.
-- **Hann crossfade at chunk boundaries:** tested 10ms/20ms/40ms overlap. No audible difference — streaming decoder's internal state already handles continuity.
-- **3-bit quantization destroys EOS.** Model generates 4-25s for short sentences, all samples clip to 1.0. Same failure mode as high LR during training.
-- **mxfp8 is worse than affine 6-bit** despite more bits (11.2 vs 10.1). Slower RTF (0.84x vs 0.67x), TTFA spikes, EOS issues. Float format doesn't help here.
-- **mxfp4 has EOS issues on short utterances.** "Okay." generated 6s. nvfp4 is cleaner but no quality advantage over affine.
-- **Always benchmark through server.py**, never mlx-audio's `model.generate()`. The latter shows RTF 0.63-0.84x; our server shows 0.38x. The difference is `mx.eval()`+`mx.clear_cache()` per chunk.
+- Custom generate loop = 2.3x faster than mlx-audio's streaming mode (no per-chunk `mx.clear_cache()` thrashing)
+- Code predictor is 71% of generation time (15 sequential 5-layer transformers per token)
+- 12 of 16 codebooks is the sweet spot — skip 13-16 for 18% speed gain, negligible quality loss
+- Two-phase streaming: first chunk at 3 tokens (~120ms TTFA), then 40-token chunks
+- `psutil RSS` is garbage for MLX memory — use `mx.metal.get_active_memory()`
+- Leading 220ms silence is architectural (all codec LMs) — trim at inference or overlap with LLM streaming
+- On GPU: `faster-qwen3-tts` (pip) gives ~3x speedup via CUDA graphs (kernel launch overhead is the bottleneck, not compute)
 
 ## What's NOT Known / Unresolved
 

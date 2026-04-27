@@ -123,7 +123,8 @@ def train():
                     ref_mels.to(model.device).to(model.dtype)
                 ).detach()
 
-                # Cache per-voice first-seen embedding
+                # Cache per-voice first-seen embedding (from non-padded batches ideally,
+                # but even padded ones are ok — we only need one good extraction per voice)
                 for b_idx, vname in enumerate(voice_names):
                     if vname not in target_speaker_embeddings:
                         target_speaker_embeddings[vname] = speaker_embedding[b_idx:b_idx+1]
@@ -136,7 +137,11 @@ def train():
                     model.talker.model.text_embedding(input_text_ids)
                 ) * text_embedding_mask
                 input_codec_embedding = model.talker.model.codec_embedding(input_codec_ids) * codec_embedding_mask
-                input_codec_embedding[:, 6, :] = speaker_embedding
+
+                # FIX: inject cached per-voice embeddings, not live extraction.
+                # Live extraction is corrupted by ref_mel zero-padding in mixed-voice batches.
+                for b_idx, vname in enumerate(voice_names):
+                    input_codec_embedding[b_idx, 6, :] = target_speaker_embeddings[vname][0]
 
                 input_embeddings = input_text_embedding + input_codec_embedding
 
@@ -174,6 +179,12 @@ def train():
                 accelerator.print(
                     f"Epoch {epoch} | Step {step} | Loss: {loss.item():.4f} | voices cached: {voices_seen}"
                 )
+
+        # Log embedding norms after first epoch for diagnostics
+        if accelerator.is_main_process and epoch == 0:
+            for vname, emb in target_speaker_embeddings.items():
+                norm = emb.norm().item()
+                print(f"  [diag] {vname} embedding norm: {norm:.4f}")
 
         if accelerator.is_main_process:
             output_dir = os.path.join(args.output_model_path, f"checkpoint-epoch-{epoch}")
