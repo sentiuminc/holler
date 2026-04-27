@@ -172,13 +172,48 @@ def dynamic_presence(audio, sr=24000, low_hz=3500, high_hz=8000,
 
 
 # ============================================================
+# Stage 5: Trim silence
+# ============================================================
+def trim_silence(audio, sr=24000, pad_ms=100, fade_ms=20, threshold=0.001):
+    """Trim to speech boundaries with padding and fade-out."""
+    win = int(sr * 0.01)  # 10ms window
+    pad = int(sr * pad_ms / 1000)
+    fade = int(sr * fade_ms / 1000)
+
+    speech_start = 0
+    for i in range(0, len(audio) - win, win):
+        if np.sqrt(np.mean(audio[i:i+win]**2)) > threshold:
+            speech_start = i
+            break
+
+    speech_end = len(audio)
+    for i in range(len(audio) - win, -1, -win):
+        if np.sqrt(np.mean(audio[i:i+win]**2)) > threshold:
+            speech_end = i + win
+            break
+
+    trim_start = max(0, speech_start - pad)
+    trim_end = min(len(audio), speech_end + pad)
+    trimmed = audio[trim_start:trim_end].copy()
+
+    if len(trimmed) > fade:
+        trimmed[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+
+    return trimmed
+
+
+# ============================================================
 # Full pipeline
 # ============================================================
 def enhance_full(audio, sr=24000, gender='male',
                  skip_denoise=False, skip_deess=False, skip_presence=False,
+                 skip_trim=False,
                  target_lufs=-22.0, peak_ceiling=-3.0):
-    """Complete enhancement: denoise → LUFS → de-ess → presence."""
+    """Complete enhancement: trim → denoise → LUFS → de-ess → presence."""
     preset = PRESETS[gender]
+
+    if not skip_trim:
+        audio = trim_silence(audio, sr)
 
     if not skip_denoise:
         audio = denoise(audio, sr)
@@ -209,6 +244,7 @@ def main():
     parser.add_argument("--skip-denoise", action="store_true")
     parser.add_argument("--skip-deess", action="store_true")
     parser.add_argument("--skip-presence", action="store_true")
+    parser.add_argument("--skip-trim", action="store_true")
     parser.add_argument("--target-lufs", type=float, default=-22.0)
     parser.add_argument("--peak-ceiling", type=float, default=-3.0)
     args = parser.parse_args()
@@ -230,6 +266,7 @@ def main():
         wavs = [w for w in wavs if start <= int(w.stem.split('_')[-1]) <= end]
 
     stages = []
+    if not args.skip_trim: stages.append("trim")
     if not args.skip_denoise: stages.append("DeepFilter")
     stages.append(f"LUFS {args.target_lufs}")
     if not args.skip_deess: stages.append(f"de-ess ({args.gender})")
@@ -250,6 +287,7 @@ def main():
                                     skip_denoise=args.skip_denoise,
                                     skip_deess=args.skip_deess,
                                     skip_presence=args.skip_presence,
+                                    skip_trim=args.skip_trim,
                                     target_lufs=args.target_lufs,
                                     peak_ceiling=args.peak_ceiling)
             sf.write(str(out_dir / src_path.name), enhanced, sr)

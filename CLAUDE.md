@@ -254,12 +254,13 @@ python tools/enhance_clips.py --voice katie --gender female
 
 Reads `audio-original/`, writes `audio/`. Four stages:
 
-### Enhancement Pipeline: DeepFilter → LUFS → De-ess → Presence
+### Enhancement Pipeline: Trim → DeepFilter → LUFS → De-ess → Presence
 
-1. **DeepFilterNet3** (single pass) — 2.1M-param neural denoiser. SNR gating: does nothing on already-clean audio (>+20dB SNR). Resample 24k→48k→24k.
-2. **LUFS normalize** — target -22 LUFS integrated, peak ceiling -3 dBFS. Linear gain only, no compression.
-3. **Spectral de-esser** — STFT-based per-bin adaptive sibilance reduction. Each bin uses its own median as baseline, only reduces peaks above it. Lookahead 8ms.
-4. **Dynamic presence** — STFT-based per-bin adaptive presence lift. Boosts bins proportionally to how far below their median they are. Smooth tanh curve, never pushes bright moments brighter.
+1. **Trim silence** — find speech boundaries (10ms RMS windows, threshold 0.001), keep 100ms padding on each side, 20ms fade-out. Removes the 1s generation padding + any leading silence.
+2. **DeepFilterNet3** (single pass) — 2.1M-param neural denoiser. SNR gating: does nothing on already-clean audio (>+20dB SNR). Resample 24k→48k→24k.
+3. **LUFS normalize** — target -22 LUFS integrated, peak ceiling -3 dBFS. Linear gain only, no compression. Must run AFTER trim so loudness measurement covers speech only.
+4. **Spectral de-esser** — STFT-based per-bin adaptive sibilance reduction. Each bin uses its own median as baseline, only reduces peaks above it. Lookahead 8ms.
+5. **Dynamic presence** — STFT-based per-bin adaptive presence lift. Boosts bins proportionally to how far below their median they are. Smooth tanh curve, never pushes bright moments brighter.
 
 ### Tunable Knobs
 
@@ -324,9 +325,24 @@ Reference voice: Serena (built-in CustomVoice). Derived from comprehensive analy
 
 ### Analysis Tools
 
-- `tools/analyze_voice_quality.py` — 20+ metrics: levels, spectrum, voice quality (Praat), DNSMOS perceptual scores
+- `tools/analyze_voice_quality.py` — comprehensive 20+ metric voice quality analysis with statistical summary
 - `tools/noise_profile.py` — before/after noise comparison by frequency band
 - `tools/deess.py` — standalone de-esser (also integrated in enhance_clips.py)
+
+**Usage:**
+```bash
+# Analyze a directory of clips (samples N random clips)
+python tools/analyze_voice_quality.py --source voices/joe/training-data/audio --label "joe-v1" --n 80
+
+# Export to JSON for comparison
+python tools/analyze_voice_quality.py --source <dir> --label "name" --n 80 --json output.json
+
+# Compare two sets
+python tools/analyze_voice_quality.py --source <dir1> --label "before" --n 50
+python tools/analyze_voice_quality.py --source <dir2> --label "after" --n 50
+```
+
+**Metrics reported:** peak_db, rms_db, crest_db, lufs, dc_offset | centroid_hz, harsh_2_4k, sib_4_10k, presence_1_5k, low_80_300, air_10k, tilt_db_oct, flatness, rolloff_hz | silence_ratio, dyn_range_db | f0_mean/std/range, voiced_ratio, jitter_pct, shimmer_pct, hnr_db, f1/f2/f3_hz | dnsmos_sig/bak/ovrl. Uses parselmouth (Praat) for voice quality, torchmetrics for DNSMOS P.835. Requires `.venv-enhance-audio/`.
 
 ### Dependencies
 
