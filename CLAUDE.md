@@ -14,17 +14,16 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-04-26)
+## Current State (2026-04-28)
 
 - **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only. Now with `--save_every_steps` for fractional epoch checkpoints.
-- **Katie v6 (current production):** Clean. 6-bit affine g64, RTF 0.38, TTFA 139ms.
-- **Katie v8 training data (ready):** 452 curated clips, 31.3 min, enhanced (ClearVoice→DeepFilter→RecipeE→presence boost). At `voices/katie/training-data/train_curated.jsonl`. Mixed prosody: 18% emotional, 6% questions, 76% statements. Next step: rent GPU and train.
+- **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
+- **Kit + Dakota (current):** 2-voice checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good.
+- **Voices confirmed for Holler v1:** Kit (Prism), Dakota (Trail Guide), plus 8 more TBD from 22 curated candidates.
+- **Training data generated on GPU:** Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF. Scripts at `training/remote_generate_training_data.py` + `training/corpus.json`. **Do NOT use `faster-qwen3-tts` for voice cloning** — it breaks voice identity.
 - **Quantization:** 6-bit affine g64 is the pick.
-  - `checkpoints/katie-v6/` — bf16, 1.7GB disk (source for quantization)
-  - `checkpoints/quant-experiment/affine-6bit-g64/` — **6-bit affine (the pick)**, 1094MB disk, 1.7GB Metal RAM, RTF 0.38, TTFA 139ms
-- **Multi-voice (Katie+Joe, v7):** bf16 only at `checkpoints/katie-joe-v7/`. Quality issues. Not production-grade.
-- **Voices designed:** 2/30 (Katie, Joe). 28 more needed.
 - **Inference runtime:** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
+- **Auto-curate thresholds need male adjustment:** Current thresholds reject 100% of male voice clips. HNR < 14 and harshness > 2% are female-calibrated. Proposed male: HNR > 8, harshness < 5%, peak > -2.
 - **Training data tools:** Full pipeline automated — `tools/regenerate_rejects.py`, `tools/enhance_clips.py`, `tools/trim_and_merge.py`, `tools/curate_clips.py`.
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
 
@@ -49,32 +48,30 @@ holler/
 │   └── test_epoch_sweep.py         — compare multiple epoch checkpoints
 ├── tools/                 — Voice design, training data generation, verification
 ├── voices/                — Per-voice reference audio + training data
-│   ├── katie/             — Female voice (Cartesia-sourced, slot 3000)
-│   │   ├── ref.wav        — 10s reference audio
-│   │   ├── cartesia_original.wav — original source
-│   │   └── training-data/ — 475 clips + train.jsonl + train_curated.jsonl (452)
-│   │       ├── audio/           — enhanced clips (new pipeline: DeepFilter→LUFS→deess→presence)
-│   │       ├── curation.json    — Tinder decisions (452 keep, 23 reject)
-│   │       └── train_curated.jsonl — TRAINING FILE (452 entries)
-│   └── joe/               — Male voice (VoiceDesign-sourced, slot 3001)
-│       ├── ref.wav              — original VoiceDesign reference
-│       ├── ref_cleaned.wav      — DeepFilter + LUFS normalized
-│       ├── candidates/    — 28 voice design candidates + index.txt
-│       └── training-data/ — 385 clips (needs regeneration at temp 0.85)
-│           ├── audio/           — enhanced clips (new pipeline)
-│           ├── audio-original/  — raw 1.7B cloner output
-│           └── train.jsonl      — full manifest (not yet curated)
+│   ├── kit/               — Androgynous voice "Prism" (VoiceDesign, slot 3000) ← CONFIRMED
+│   │   ├── ref.wav        — kit08_prism_clear
+│   │   └── training-data/ — 500 clips generated on GPU (vanilla qwen-tts)
+│   │       ├── audio/           — 500 enhanced clips
+│   │       ├── audio-original/  — 500 raw clips from 3090
+│   │       └── train.jsonl
+│   ├── dakota/            — Male voice "Trail Guide" (VoiceDesign, slot 3001) ← CONFIRMED
+│   │   ├── ref.wav        — dakota03_trail_guide
+│   │   └── training-data/ — 400 clips (clips 101-500, first 100 were bad faster-qwen3-tts)
+│   │       ├── audio/           — 400 enhanced clips
+│   │       ├── audio-original/  — 400 raw clips from 3090
+│   │       └── train.jsonl
+│   ├── katie/             — Female voice (DEV ONLY, not shipping)
+│   │   └── training-data/ — 452 curated clips
+│   ├── nora/              — Female voice (VoiceDesign, slot 3002)
+│   │   └── training-data/ — 500 clips, 366 curated
+│   └── joe/               — Male voice (VoiceDesign, slot 3003)
+│       └── training-data/ — 500 clips, 53 curated (89% rejection — needs regen or relaxed thresholds)
 ├── checkpoints/           — Model checkpoints (not in git — large)
-│   ├── katie-v6/          — 1.7GB bf16 (source for quantization)
-│   ├── katie-v6-4bit/     — 960MB 4-bit affine (previous pick)
-│   ├── katie-joe-v7/      — 2.3GB bf16, multi-voice, quality unresolved
-│   └── quant-experiment/  — All quantization variants tested 2026-04-24
-│       ├── affine-6bit-g64/ — 1094MB ← THE PICK
-│       ├── affine-4bit-g64/ — 960MB (baseline comparison)
-│       ├── affine-4bit-g32/, affine-4bit-g128/ — group size variants
-│       ├── affine-3bit-g64/ — 893MB (BROKEN — EOS lost)
-│       ├── affine-8bit-g64/ — 1210MB
-│       ├── mxfp4/, nvfp4/, mxfp8/ — alternative formats
+│   ├── katie-v6/          — 1.7GB bf16 (dev voice, not shipping)
+│   ├── nora-joe-v1/       — 2.3GB bf16, multi-voice (reference for training quality)
+│   ├── nora-joe-v1-6bit/  — 1.7GB 6-bit affine
+│   ├── holler-kit-dakota/     — 1.7GB bf16, Kit+Dakota 2-voice
+│   └── holler-kit-dakota-6bit/ — 1.1GB 6-bit affine ← CURRENT
 ├── samples/               — Audio samples organized by version/voice/precision
 │   ├── quant-experiment/  — A/B samples from quantization experiment
 │   ├── benchmark-katie-v6-{bf16,4bit}/ — older benchmark clips
@@ -182,13 +179,19 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 
 Quick reference tools:
 ```bash
-# Enhance clips
+# Enhance training data (cloned from 1.7B-Base — may have noise from ref)
 .venv-enhance-audio/bin/python tools/enhance_clips.py --voice <name> --gender <male|female>
+# Enhance VoiceDesign output (already-clean TTS — no DeepFilter, no STFT)
+.venv-enhance-audio/bin/python tools/enhance_voicedesign.py --input <dir> --output <dir>
 # Auto-curate (report, then --apply)
 .venv-enhance-audio/bin/python tools/auto_curate.py --voice <name>
 # Analyze quality
 .venv-enhance-audio/bin/python tools/analyze_voice_quality.py --source <dir> --label <name> --n 80
 ```
+
+**Two enhancement pipelines exist — use the right one:**
+- `enhance_clips.py` — for training data cloned from real-world ref audio. Full pipeline: DeepFilter → LUFS → STFT de-ess → presence.
+- `enhance_voicedesign.py` — for VoiceDesign candidate output. Lightweight: trim → LUFS → IIR notch. DeepFilter and STFT processing create chirping/musical noise artifacts on already-clean synthetic audio.
 
 ## Community References
 
@@ -225,12 +228,15 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ## What's Next
 
-1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE. `inference/server.py` + `sidecar/tts-sidecar-fast.py`. RTF 0.38, TTFA 139ms (6-bit).
-2. ~~**Try alternative quantization**~~ — ✅ DONE (2026-04-24). Tested 8 variants: affine 3/4/6/8-bit, mxfp4, mxfp8, nvfp4, multiple group sizes. 6-bit affine g64 wins on voice quality. See Quantization section.
-3. **Enhance training audio** — IN PROGRESS (2026-04-24). ClearVoice→DeepFilter→E pipeline applied to all 770 clips (Katie + Joe). Audio quality enhanced. Still need manual curation: listen to all clips, remove bad prosody/wonky ones (~30% estimated). Automated filters can't catch prosody issues — only ears can.
-3b. **Retrain Katie+Joe with curated+enhanced data** — blocked on manual curation (step 3).
-4. **Solve multi-voice quality** — v7 Katie+Joe has issues (short utterances generate silence). Root cause still unknown.
-5. **Design and train more voices** — 28 more needed. Names and characters in `voices/VOICES.md`.
-6. **Standardize GPU runbook** — from-scratch instance setup → training → quantization → 6-bit conversion
-7. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only
-8. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop. Easy win for the community.
+1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE.
+2. ~~**Try alternative quantization**~~ — ✅ DONE. 6-bit affine g64 wins.
+3. ~~**Enhance training audio**~~ — ✅ Pipeline proven.
+4. ~~**GPU training data generation**~~ — ✅ DONE. Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF (~25 min/voice). Scripts ready.
+5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Needs Tinder curation pass.
+6. **Add male auto-curate thresholds** — current thresholds reject 100% of male clips. Proposed: HNR > 8, harshness < 5%, peak > -2.
+7. **Tinder curation** — Kit (500 clips) and Dakota (400 clips) need manual listening pass.
+8. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
+9. **Full 10-voice train** — once all voices curated, single multi-voice training run.
+10. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
+11. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
+12. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.

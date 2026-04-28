@@ -77,9 +77,23 @@ for result in model.generate_voice_design(
     chunks.append(result.audio)
 ```
 
-**Proven target texts (punctuation variety + emotional range):**
-- `"Look, I already checked the numbers twice. They don't add up, and I'm not gonna sugarcoat it for you. We need to fix this before the meeting, or we're in trouble."`
-- `"Oh wow, that actually worked! Can you believe it? I honestly thought we were going to have to start over but no, it just clicked."`
+**Proven target texts:**
+- Assistant-style: `"Okay, so I looked into it and here's what I found. The file you were working on got saved to your Downloads folder, not your Desktop. Want me to move it over, or would you rather keep it where it is?"`
+- Character-style: `"Look, I already checked the numbers twice. They don't add up, and I'm not gonna sugarcoat it for you. We need to fix this before the meeting, or we're in trouble."`
+
+Use assistant-style for voices meant to be assistants. Character-style makes voices sound like movie characters.
+
+**Prompting tips (from 800+ candidate analysis):**
+- "Velvety", "smooth", "warm", "natural" produce cleaner male voices (40% pass vs 13% for "gravelly"/"rough")
+- High-pitched female voices all sound identical — vary texture/pacing, not just energy
+- VoiceDesign **cannot produce regional accents** — it controls timbre only. For accented voices, find real accented ref audio and clone.
+- Temp 0.8 has slightly better quality pass rate than 0.9 or 0.75
+
+**Enhance VoiceDesign output** with `tools/enhance_voicedesign.py` (trim → LUFS → IIR notch), NOT `enhance_clips.py`. The full pipeline's STFT de-esser creates chirping/musical noise on already-clean synthetic audio.
+
+```bash
+.venv-enhance-audio/bin/python tools/enhance_voicedesign.py --input <raw_dir> --output <enhanced_dir>
+```
 
 Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 for cleaner version.
 
@@ -87,16 +101,56 @@ Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 fo
 
 Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -22 LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
-### 2. Generate Training Data (~1.5 hours, unattended)
+**⚠️ CRITICAL: Verify ref audio is at -22 LUFS before training.** The model learns loudness from the ref embedding. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — a 6.8 dB gap. Result: Joe too loud, Nora too quiet at inference, even though training clips were both normalized to -22 LUFS. The ref embedding carries loudness information the training data can't override.
 
-500 clips via 1.7B-Base-bf16 voice cloning. Temperature **0.85** (0.6 = monotone — F0 range 168 Hz vs 235 Hz at 0.85). Do NOT append trailing silence — it masks abrupt cutoffs instead of exposing them.
+```bash
+# Quick check — all refs should be close to -22 RMS
+.venv-enhance-audio/bin/python -c "
+import soundfile as sf; import numpy as np
+data, sr = sf.read('voices/<name>/ref.wav')
+print(f'RMS: {20*np.log10(np.sqrt(np.mean(data**2))+1e-10):.1f} dBFS')
+print(f'Peak: {20*np.log10(np.max(np.abs(data))+1e-10):.1f} dBFS')
+"
+```
+
+### 2. Generate Training Data
+
+500 clips via 1.7B-Base voice cloning. Temperature **0.85** (0.6 = monotone — F0 range 168 Hz vs 235 Hz at 0.85). Do NOT append trailing silence — it masks abrupt cutoffs instead of exposing them.
+
+**Option A: GPU on Vast.ai (~25 min per voice, recommended)**
+
+Use vanilla `qwen-tts` on a rented 3090. Runs at 0.7x RTF — 500 clips in ~25 min per voice.
+
+```bash
+# Upload ref audio
+scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/ref.wav root@<HOST>:/workspace/voices/<voice>_ref.wav
+
+# Upload generation script + corpus (if not already on instance)
+scp -i ~/.ssh/runpod -P <PORT> training/remote_generate_training_data.py training/corpus.json root@<HOST>:/workspace/
+
+# Generate (runs vanilla qwen-tts, single worker)
+ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> \
+  "/workspace/.venv/bin/python3 /workspace/run_vanilla.py"
+# Or use the multi-worker script with --workers 1 for vanilla-quality output
+
+# Download results
+mkdir -p voices/<voice>/training-data/audio-original
+scp -i ~/.ssh/runpod -P <PORT> "root@<HOST>:/workspace/output/<voice>/*.wav" \
+  voices/<voice>/training-data/audio-original/
+scp -i ~/.ssh/runpod -P <PORT> "root@<HOST>:/workspace/output/<voice>/train.jsonl" \
+  voices/<voice>/training-data/
+```
+
+**⚠️ Do NOT use `faster-qwen3-tts` for training data generation.** Its StaticCache + CUDA graphs degrade voice cloning fidelity — clips randomly lose the reference voice identity. Tested and confirmed 2026-04-28. Use vanilla `qwen-tts` (`Qwen3TTSModel.from_pretrained()` + `generate_voice_clone()`). faster-qwen3-tts is fine for checkpoint verification (fine-tuned voices via `generate_custom_voice()`), just not for ref-audio voice cloning.
+
+**Option B: Local on Mac (~1.5 hours per voice)**
 
 ```bash
 cd holler && .venv/bin/python tools/generate_training_data.py \
   --voice <name> --ref-text "<exact transcript of ref.wav>"
 ```
 
-Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit). Outputs to `voices/<name>/training-data/audio-original/` + `train.jsonl`.
+Uses `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit) via mlx-audio. Outputs to `voices/<name>/training-data/audio-original/` + `train.jsonl`.
 
 ### 3. Enhance Clips (~3 min)
 
@@ -232,9 +286,9 @@ scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_setup.sh root@<HOST>:/work
 ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_setup.sh"
 ```
 
-Setup installs: torch 2.6, qwen-tts, flash-attn 2.7.3, sox, safetensors. Downloads 0.6B-Base + Tokenizer-12Hz. Takes ~5 min.
+Setup installs: torch 2.6, qwen-tts, faster-qwen3-tts, flash-attn 2.7.3, sox, bmon/nvtop/htop. Downloads 1.7B-Base (data generation) + 0.6B-Base (training) + Tokenizer-12Hz. Takes ~5 min.
 
-**Note:** `remote_setup.sh` uses `huggingface-cli download` (newer hf_hub versions). If it fails on the hf_cli module path, run `huggingface-cli download` directly.
+**HuggingFace CLI:** Use `hf download` (not the deprecated `huggingface-cli download` or `python -m huggingface_hub.commands.hf_cli`). The `hf` binary is at `$VENV/bin/hf` after installing `huggingface_hub`.
 
 ### Step 2: Upload Training Data
 
@@ -274,7 +328,7 @@ Run PyTorch inference on the checkpoint before downloading. Use `inference/test_
 - Audio lengths proportional to text
 - Peaks < 1.0 (no hard clipping)
 
-**For faster inference:** `pip install faster-qwen3-tts` — CUDA graph optimization, ~3x speedup on 3090. Uses `FasterQwen3TTS.from_pretrained()`, returns `(audio_chunks, sample_rate)` tuple.
+**For faster inference:** `pip install faster-qwen3-tts` — CUDA graph optimization, ~3x speedup on 3090. Uses `FasterQwen3TTS.from_pretrained()` + `generate_custom_voice()`. Fine for checkpoint verification (fine-tuned voices), just don't use it for ref-audio voice cloning (degrades voice identity — see Step 2 warning).
 
 ### Step 5: Download + Quantize Locally
 
@@ -339,6 +393,8 @@ Codec_embedding and speaker embedding layers stay bf16 automatically (converter 
 - **sdpa is a valid fallback** if flash-attn won't build. Same training results.
 - **JSONL relative paths** resolve from cwd. Symlink `audio/` and `ref.wav` into the working directory.
 - **`generate_custom_voice()` return type varies** across qwen-tts versions — can be tensor, tuple, or list. Always handle all three.
+- **Python stdout buffering over SSH.** Remote scripts produce no output until completion because Python buffers stdout when not attached to a TTY. Always set `PYTHONUNBUFFERED=1` or use `python -u` in remote training/generation scripts.
+- **SSH key for Vast.ai:** `~/.ssh/runpod`
 
 ## Sample Size Findings (2026-04-27)
 
