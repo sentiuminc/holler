@@ -10,6 +10,10 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Focus:** Mac. Local inference on Apple Silicon specifically. The training can happen on any CUDA GPU, but the inference target is mlx-audio on M-series Macs.
 
+## HARD RULES
+
+- **NEVER delete checkpoints without explicit confirmation from Chris.** Not during cleanup, not during session wrap, not ever. Checkpoints represent hours of GPU time and are irreplaceable once gone. Ask before deleting. This includes bf16 originals, quantized copies, and anything in `checkpoints/`.
+
 **Origin:** Started as the voice component of [ivi](https://ivi.computer), a macOS notch AI assistant by Sentium. We open-sourced it because Qwen3-TTS is SOTA for local inference but ships with only 2 mediocre English voices — and nothing else fills that gap.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.

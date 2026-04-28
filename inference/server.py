@@ -32,12 +32,12 @@ from mlx_audio.tts import load
 from mlx_lm.sample_utils import categorical_sampling
 
 DEFAULT_CHECKPOINT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  "checkpoints", "katie-v8-epoch-1.2-6bit")
+                                  "checkpoints", "holler-kit-dakota-6bit")
 DEFAULT_PORT = 8100
 CHECKPOINT = DEFAULT_CHECKPOINT
 PORT = DEFAULT_PORT
 SAMPLE_RATE = 24000
-DEFAULT_VOICE = "nora"
+DEFAULT_VOICE = "kit"
 DEFAULT_TEMP = 0.6
 DEFAULT_TOP_K = 50
 MAX_TOKENS = 500
@@ -402,7 +402,7 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
 
 _carry_over_state = {}
 
-def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6,
+def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
                    top_k=50, max_tokens=500, n_codebooks=DEFAULT_CODEBOOKS,
                    reset_decoder=True):
     """Generate speech, yielding float32 audio chunks.
@@ -415,6 +415,8 @@ def generate_audio(mdl, text, voice="katie", language="english", temperature=0.6
 
     NOT thread-safe — callers must acquire generate_lock before iterating.
     """
+    if voice is None:
+        voice = DEFAULT_VOICE
     global _carry_over_state
     cache_out = _carry_over_state if not reset_decoder else {}
     if reset_decoder:
