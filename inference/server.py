@@ -96,12 +96,11 @@ def _mlx_worker():
     )
     zero_token_cache = mx.zeros((1, 1), dtype=mx.int32)
 
+    print(f"[holler] Warming up...", flush=True)
     for _ in generate_audio(model, "Hello.", voice=DEFAULT_VOICE):
         pass
     for _ in generate_audio(model, "Testing warmup.", voice=DEFAULT_VOICE):
         pass
-
-    print(f"[holler] Ready in {time.time()-t0:.1f}s — http://localhost:{PORT}", flush=True)
 
     while True:
         try:
@@ -773,9 +772,10 @@ def main():
             print(f"[holler] Error: port {PORT} is already in use. Use -p to specify a different port.", flush=True)
             sys.exit(1)
 
+    t0 = time.time()
     load_model()
     server = ThreadingServer(("0.0.0.0", PORT), TTSHandler)
-    print(f"[holler] Server running on http://localhost:{PORT}", flush=True)
+    print(f"[holler] Ready in {time.time()-t0:.1f}s — http://localhost:{PORT}", flush=True)
     print(f"[holler] POST /speak — streaming float32 PCM", flush=True)
     print(f"[holler] GET  /tts?text=hello — WAV download", flush=True)
     print(f"[holler] GET  /benchmark — RTF benchmark", flush=True)
