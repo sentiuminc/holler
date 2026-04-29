@@ -519,13 +519,29 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
             inference_queue.put((response_q, cancel_event, {
                 "text": text, "voice": voice, "temperature": temperature
             }))
+            timed_out = False
             while True:
-                chunk = response_q.get()
+                try:
+                    chunk = response_q.get(timeout=30)
+                except _queue.Empty:
+                    cancel_event.set()
+                    timed_out = True
+                    print(f"[holler] Timeout (30s no chunk) | {text[:80]}", flush=True)
+                    break
                 if chunk is None:
                     break
                 if isinstance(chunk, Exception):
                     break
                 all_audio.append(chunk)
+
+            if timed_out:
+                err = b'{"error":"generation timed out"}'
+                self.send_response(504)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(err)))
+                self.end_headers()
+                self.wfile.write(err)
+                return
 
             if all_audio:
                 audio = np.concatenate(all_audio)
@@ -638,7 +654,12 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             while True:
-                chunk = response_q.get()
+                try:
+                    chunk = response_q.get(timeout=30)
+                except _queue.Empty:
+                    cancel_event.set()
+                    print(f"[holler] Timeout (30s no chunk) | {text[:80]}", flush=True)
+                    break
                 if chunk is None:
                     break
                 if isinstance(chunk, Exception):
