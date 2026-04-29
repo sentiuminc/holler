@@ -28,7 +28,6 @@ from pathlib import Path
 
 import numpy as np
 import mlx.core as mx
-# from scipy.signal import sosfilt, sosfilt_zi  # uncomment with de-ess filter
 from mlx_audio.tts import load
 from mlx_lm.sample_utils import categorical_sampling
 
@@ -61,6 +60,7 @@ model = None
 suppress_indices_cache = None
 zero_token_cache = None
 available_voices = [DEFAULT_VOICE]
+last_request_time = time.time()
 
 # ---------------------------------------------------------------------------
 # MLX Worker — all MLX calls run on this single long-lived thread.
@@ -466,9 +466,6 @@ def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
     print(f"[holler] All retries failed | {text}", flush=True)
 
 
-last_request_time = time.time()
-
-
 class TTSHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -488,7 +485,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
                 return
             body = b"tts-test.html not found"
             self.send_response(404)
-
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -501,7 +497,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
             if not text:
                 err = b'{"error":"missing text parameter"}'
                 self.send_response(400)
-    
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(err)))
                 self.end_headers()
@@ -563,7 +558,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
 
             wav_data = buf.getvalue()
             self.send_response(200)
-
             self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(wav_data)))
             self.send_header("X-RTF", f"{rtf:.3f}")
@@ -581,7 +575,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/health":
             body = json.dumps({"status": "ok", "model": os.path.basename(CHECKPOINT), "voices": available_voices}).encode()
             self.send_response(200)
-
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -590,7 +583,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         else:
             body = b'{"error":"not found"}'
             self.send_response(404)
-
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -749,10 +741,6 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
 
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
-
-
-def keepalive():
-    pass
 
 
 def main():
