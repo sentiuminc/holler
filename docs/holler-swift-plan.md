@@ -87,13 +87,15 @@ We'll figure this out by doing. First: make it work end-to-end in a Mac app. The
 
 | Metric | Python server (our optimized) | mlx-audio-swift (stock) | **Swift optimized** |
 |---|---|---|---|
-| TTFA streaming | **126ms** | 350ms | **128ms (12cb) / 143ms (16cb)** |
-| RTF | **0.38** (2.6x RT) | 0.52 (1.9x RT) | **0.43 (2.33x RT, 12cb) / 0.49 (2.04x RT, 16cb)** |
+| TTFA streaming | 128-144ms | 350ms | **143-146ms** |
+| RTF (12cb, streaming) | 0.45-0.50 (~2.0-2.2x RT) | 0.52 (1.9x RT) | **0.44-0.50 (~2.0x RT)** |
+| RTF (16cb, streaming) | N/A | 0.52 (1.9x RT) | **0.44-0.50 (~2.0x RT)** |
+| TTFB consistency | Variable (128-846ms) | 350ms+ | **Rock solid: 143-146ms** |
 | GPU memory | ~1.7GB | ~1.8GB | ~1.78GB |
 | Model load | ~1.5s | ~5s (more warmup) | ~2s (incl. warmup) |
 | First-run TTFA | N/A | 451ms (shader JIT) | **144ms (warmup eliminates JIT)** |
 
-The gap is NOT inherent to Swift — both use the same C++ core and Metal backend. It's entirely in how the generation loop is structured.
+**Swift matches Python on throughput and wins on consistency.** Both use the same C++ Metal backend. The old "Python is 2.6x realtime" number was from an earlier benchmark under different conditions; fresh side-by-side tests (2026-04-30) show both engines at ~2.0x realtime streaming. Swift's TTFB never spikes — Python occasionally hits 300-800ms on short sentences.
 
 ### Optimizations Applied (2026-04-29)
 
@@ -102,39 +104,37 @@ The gap is NOT inherent to Swift — both use the same C++ core and Metal backen
 3. **3-token streaming chunks** — ✅ DONE. Consistent small chunks throughout (not two-phase). Steady audio flow for streaming.
 4. **Warmup on model load** — ✅ DONE. Dummy forward pass through talker + code predictor + codec decoder. Front-loads Metal shader JIT (~300ms one-time cost at load).
 5. **Codebooks as per-request parameter** — ✅ DONE. `codebooks: 12` (fast) or `codebooks: 16` (full, default). No restart needed.
-6. **compile() the Talker step** — ❌ BLOCKED. See section below.
+6. **compile() the Talker step** — ✅ INVESTIGATED, ❌ NOT BENEFICIAL. See section below.
 
-## Optimization Plan (Remaining)
+## Optimization Investigation Log
 
-### 1. compile() the Talker step — BIGGEST REMAINING WIN
+### 1. compile() the Talker step — INVESTIGATED, NOT BENEFICIAL
 
-mlx-audio-swift already has compiled SwiGLU activations. The full-step compile (fusing ~420 Metal kernel dispatches per token) is where the remaining 10-20% RTF gap lives.
+**Status (2026-04-30): RESOLVED.** compile() works but doesn't help for this model size.
 
-speech-swift proves this works:
-```swift
-compiledTalkerStep = compile(
-    inputs: [talkerRef], outputs: [talkerRef], shapeless: true
-) { inputs in
-    let embeds = inputs[0]
-    let cos = inputs[1]
-    let sin = inputs[2]
-    // KV pairs at inputs[3...]
-    // ... layer loop with stepWithRawCache ...
-}
-```
+**What we tried (2026-04-29):** Four approaches, all failed:
+1. `shapeless: true` with MRoPE → Slice/Split can't infer shapes
+2. MRoPE outside compile, pass cos/sin → rotateHalf still uses shape-dependent slicing
+3. Compile-safe rotateHalf using roll() → roll uses Split internally
+4. `shapeless: false` → recompiles every step (KV cache grows), 30% slower
 
-**Status (2026-04-29): BLOCKED.** Attempted four approaches:
+**What we found (2026-04-30):** speech-swift solved this differently — replace MRoPE with `MLXNN.RoPE` (backed by `MLXFast.rope`, a single fused Metal kernel). For TTS, all 3 MRoPE axes are always identical (T=H=W), so standard 1D RoPE produces mathematically identical output. `MLXFast.rope` has no shape-dependent operations, so `compile(shapeless: true)` works.
 
-1. `shapeless: true` with full forward pass → "Slice cannot infer output shapes" (MRoPE integer slicing `freqs[0]`, `freqs[1]`, `freqs[2]`)
-2. Moved MRoPE/RoPE outside compiled function, pass cos/sin as inputs → still fails on `rotateHalf` (`x[.ellipsis, ..<half]`)
-3. Compile-safe `rotateHalf` using `roll()` + sign mask → "Split cannot infer output shapes" (roll uses Split internally)
-4. `shapeless: false` → compiles and runs correctly, but 30% slower than no compilation (recompiles every step because KV cache shape grows by 1 each token)
+**Implementation:** Added `MLXNN.RoPE` to `TalkerAttention`, rewrote `stepWithRawCache` to use `rope(q, offset: MLXArray)` instead of manual cos/sin. `setupCompilation()` now uses `shapeless: true` with offset as `MLXArray` (not baked Int). Compiles and runs correctly — voice output verified.
 
-**Root cause:** MLX `compile()` with `shapeless: true` cannot handle ANY operation where the computation graph depends on array shapes (Slice, Split, Roll, reshape with `.dim()` values). This is a fundamental constraint, not a bug.
+**Benchmark (M1 Pro, 0.6B 6-bit):**
+| | Compiled | Uncompiled |
+|---|---|---|
+| Per-step avg | 29.5ms | 26.1ms |
+| Talker forward (graph build) | 4.8ms | 0.9ms |
+| Code predictor | 2.3ms | 2.5ms |
+| eval() GPU sync barrier | ~22ms | ~22ms |
 
-**Fix (not yet implemented):** Pre-allocate KV cache to a fixed max size (e.g., 500 tokens). Write new K/V by offset instead of concatenation. Shapes never change between steps → `shapeless: false` never recompiles. This is how KVCacheSimple already works internally (pre-allocated with step=256), but the compiled path needs raw arrays that bypass the protocol.
+**Why it doesn't help:** The talker forward pass is only 0.9ms uncompiled — it just builds a lazy computation graph. The real work happens at the `eval()` barrier (~22ms), where Metal executes the whole graph. compile() can't reduce GPU execution time. The compiled path is slower because it uses concatenation-based KV cache (copies grow each step), while the uncompiled path uses KVCacheSimple (pre-allocated, slice-assign, zero-copy).
 
-**Infrastructure in place:** Raw-cache forward methods (`stepWithRawCache`) exist on `TalkerAttention`, `TalkerDecoderLayer`, `Qwen3TTSTalkerModel`, and `Qwen3TTSTalkerForConditionalGeneration`. `setupCompilation()` and `executeTalkerStep()` exist in `Qwen3TTSModel`. Just needs the cache strategy swap.
+**Note:** `mlx-lm` (Python reference) also doesn't use compile() for LLM generation. The MLX team doesn't consider it essential for decode performance — KVCacheSimple's pre-allocation provides the actual benefit.
+
+**Infrastructure preserved:** `setupCompilation()`, `executeTalkerStep()`, and `stepWithRawCache` methods all work. Uncomment `setupCompilation()` in `warmUp()` to enable. May help on larger models or newer hardware where dispatch overhead is proportionally larger relative to compute.
 
 ### 2. Lazy eval chain for Code Predictor
 
