@@ -511,6 +511,7 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
             voice = params.get("voice", [DEFAULT_VOICE])[0]
             temperature = float(params.get("temperature", [DEFAULT_TEMP])[0])
 
+            print(f"[holler] → GET /tts voice={voice} | {text[:80]}", flush=True)
             t0 = time.time()
             all_audio = []
             response_q = _queue.Queue()
@@ -611,6 +612,9 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         top_k = int(body.get("top_k", DEFAULT_TOP_K))
         n_codebooks = int(body.get("n_codebooks", DEFAULT_CODEBOOKS))
         continue_prosody = body.get("continue", False)
+
+        cont_str = " [cont]" if continue_prosody else ""
+        print(f"[holler] → POST /speak voice={voice}{cont_str} | {text[:80]}", flush=True)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
