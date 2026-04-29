@@ -18,6 +18,7 @@ import io
 import json
 import os
 import random
+import socket
 import socketserver
 import struct
 import sys
@@ -741,6 +742,11 @@ def main():
 
     CHECKPOINT = args.checkpoint
     PORT = args.port
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(("127.0.0.1", PORT)) == 0:
+            print(f"[holler] Error: port {PORT} is already in use. Use -p to specify a different port.", flush=True)
+            sys.exit(1)
 
     load_model()
     server = ThreadingServer(("0.0.0.0", PORT), TTSHandler)
