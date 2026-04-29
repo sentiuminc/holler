@@ -48,6 +48,7 @@ SILENT_ABORT_TOKENS = 16
 DEFAULT_CODEBOOKS = 12
 CARRYOVER_PAUSE_MIN_MS = 150
 CARRYOVER_PAUSE_MAX_MS = 250
+SERVE_UI = True
 
 # TODO: Dynamic de-esser for 2-6kHz ear fatigue reduction.
 # Static EQ (-5dB notch at 3kHz) was tested and works but is too crude —
@@ -475,7 +476,7 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         global last_request_time
         last_request_time = time.time()
 
-        if self.path in ("/", "/test"):
+        if self.path in ("/", "/test") and SERVE_UI:
             html_path = Path(__file__).parent / "tts-test.html"
             if html_path.exists():
                 body = html_path.read_bytes()
@@ -755,17 +756,23 @@ def keepalive():
 
 
 def main():
-    global CHECKPOINT, PORT
+    global CHECKPOINT, PORT, DEFAULT_VOICE, SERVE_UI
 
     parser = argparse.ArgumentParser(description="Holler TTS Server")
     parser.add_argument("--checkpoint", "-c", default=DEFAULT_CHECKPOINT,
                         help="Path to model checkpoint directory")
     parser.add_argument("--port", "-p", type=int, default=DEFAULT_PORT,
                         help="Server port (default: 8100)")
+    parser.add_argument("--voice", "-v", default=None,
+                        help="Default voice (default: first voice in checkpoint)")
+    parser.add_argument("--no-ui", action="store_true",
+                        help="Disable browser test UI at /")
     args = parser.parse_args()
 
     CHECKPOINT = args.checkpoint
     PORT = args.port
+    if args.no_ui:
+        SERVE_UI = False
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         if s.connect_ex(("127.0.0.1", PORT)) == 0:
@@ -774,12 +781,20 @@ def main():
 
     t0 = time.time()
     load_model()
+
+    if args.voice:
+        if args.voice not in available_voices:
+            print(f"[holler] Error: voice '{args.voice}' not found. Available: {available_voices}", flush=True)
+            sys.exit(1)
+        DEFAULT_VOICE = args.voice
+
     server = ThreadingServer(("0.0.0.0", PORT), TTSHandler)
     print(f"[holler] Ready in {time.time()-t0:.1f}s — http://localhost:{PORT}", flush=True)
     print(f"[holler] POST /speak — streaming float32 PCM", flush=True)
     print(f"[holler] GET  /tts?text=hello — WAV download", flush=True)
     print(f"[holler] GET  /benchmark — RTF benchmark", flush=True)
-    print(f"[holler] GET  / — browser test UI", flush=True)
+    if SERVE_UI:
+        print(f"[holler] GET  / — browser test UI", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
