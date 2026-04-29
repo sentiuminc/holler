@@ -98,10 +98,10 @@ def _mlx_worker():
     zero_token_cache = mx.zeros((1, 1), dtype=mx.int32)
 
     print(f"[holler] Warming up...", flush=True)
-    for _ in generate_audio(model, "Hello.", voice=DEFAULT_VOICE):
+    t_warm = time.time()
+    for _ in generate_audio(model, "Get to hootin and hollerin!", voice=DEFAULT_VOICE):
         pass
-    for _ in generate_audio(model, "Testing warmup.", voice=DEFAULT_VOICE):
-        pass
+    print(f"[holler] Warmup done in {time.time()-t_warm:.1f}s", flush=True)
 
     while True:
         try:
