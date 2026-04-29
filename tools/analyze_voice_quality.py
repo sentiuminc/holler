@@ -9,9 +9,18 @@ Measures everything that influences voice quality:
 - Dynamics: silence ratio, dynamic range
 - Noise: DNSMOS (SIG/BAK/OVRL — no-reference perceptual quality)
 
+Compare mode (--compare): A/B analysis between original and processed clips.
+Measures processing artifacts that single-source analysis can't detect:
+- Chirp score: spectral flux delta in 4-10kHz (STFT reconstruction artifacts)
+- Plosive harshness: transient burst energy in 3-6kHz relative to sustained speech
+- Artifact ratio: energy in the difference signal by frequency band
+- De-essing effectiveness: sibilance reduction without clarity loss
+
 Usage:
   python analyze_voice_quality.py --source ~/Downloads/qwen3-builtin-voices --label "CustomVoice"
   python analyze_voice_quality.py --source voices/katie/training-data/audio --label "Katie train" --n 80
+  python analyze_voice_quality.py --compare --original voices/kit/training-data/audio-original --processed voices/kit/training-data/audio --label "Kit current" --n 50
+  python analyze_voice_quality.py --compare --original voices/kit/training-data/audio-original --processed ~/Downloads/kit-new-pipeline --match-suffix "_3_new" --original-suffix "_1_original" --label "Kit new pipeline"
 """
 import argparse
 import numpy as np
@@ -240,6 +249,273 @@ def analyze_clip(path):
     }
 
 
+# ============================================================
+# Compare mode: A/B artifact analysis
+# ============================================================
+
+def _detect_transients(audio, sr, threshold_db=6.0, min_gap_ms=30):
+    """Find transient onset positions (plosives, clicks)."""
+    win = int(0.003 * sr)  # 3ms for fast transients
+    hop = win // 2
+    n_frames = (len(audio) - win) // hop + 1
+    energy = np.zeros(n_frames)
+    for i in range(n_frames):
+        s = i * hop
+        frame = audio[s:s+win]
+        rms = np.sqrt(np.mean(frame**2))
+        energy[i] = 20 * np.log10(rms + 1e-10)
+    energy_diff = np.diff(energy)
+    min_gap_frames = int(min_gap_ms * sr / 1000 / hop)
+    onsets = []
+    last = -min_gap_frames
+    for i, d in enumerate(energy_diff):
+        if d > threshold_db and (i - last) >= min_gap_frames:
+            onsets.append(i * hop)
+            last = i
+    return onsets
+
+
+def _plosive_harshness(audio, sr, onsets, band_lo=3000, band_hi=6000, window_ms=10):
+    """Measure energy burst in plosive band at each transient, relative to clip average."""
+    if not onsets:
+        return 0.0, 0
+    sos = signal.butter(4, [band_lo, band_hi], btype='band', fs=sr, output='sos')
+    filtered = signal.sosfilt(sos, audio)
+    avg_rms = np.sqrt(np.mean(filtered**2))
+    avg_db = 20 * np.log10(avg_rms + 1e-10)
+    win = int(window_ms * sr / 1000)
+    ratios = []
+    for onset in onsets:
+        end = min(onset + win, len(filtered))
+        burst = filtered[onset:end]
+        if len(burst) < win // 2:
+            continue
+        burst_rms = np.sqrt(np.mean(burst**2))
+        burst_db = 20 * np.log10(burst_rms + 1e-10)
+        ratios.append(burst_db - avg_db)
+    if not ratios:
+        return 0.0, 0
+    return float(np.mean(ratios)), len(ratios)
+
+
+def compare_clips(orig_path, proc_path, min_duration=1.5):
+    """A/B comparison between original and processed clip."""
+    orig, sr_o = sf.read(orig_path)
+    proc, sr_p = sf.read(proc_path)
+    sr = sr_o
+
+    # Align lengths (processing may trim)
+    min_len = min(len(orig), len(proc))
+    if min_len == 0:
+        return None
+
+    # Short clips produce unreliable spectral metrics
+    if min_len / sr < min_duration:
+        return {'file': Path(orig_path).name, '_skipped': True,
+                'dur_orig': round(len(orig)/sr, 2), 'dur_proc': round(len(proc)/sr, 2),
+                'skip_reason': f'too short ({min_len/sr:.1f}s < {min_duration}s)'}
+
+    # For difference analysis, use the shorter length
+    orig_short = orig[:min_len]
+    proc_short = proc[:min_len]
+
+    # --- Difference signal analysis ---
+    diff = proc_short - orig_short
+    freqs_d = np.fft.rfftfreq(min_len, 1/sr)
+    spec_diff = np.abs(np.fft.rfft(diff))
+    spec_orig = np.abs(np.fft.rfft(orig_short))
+    total_orig = np.sum(spec_orig**2) + 1e-10
+
+    def diff_band_ratio(lo, hi):
+        mask = (freqs_d >= lo) & (freqs_d <= hi)
+        return float(np.sum(spec_diff[mask]**2) / total_orig)
+
+    artifact_low = diff_band_ratio(80, 2000)    # should be near 0
+    artifact_mid = diff_band_ratio(2000, 4000)   # harshness region
+    artifact_high = diff_band_ratio(4000, 10000) # sibilance region
+    artifact_total = diff_band_ratio(80, 12000)
+
+    # --- De-essing effectiveness ---
+    freqs_w, psd_orig = signal.welch(orig_short, sr, nperseg=2048)
+    _, psd_proc = signal.welch(proc_short, sr, nperseg=2048)
+    sib_mask = (freqs_w >= 4000) & (freqs_w <= 10000)
+    clarity_mask = (freqs_w >= 1000) & (freqs_w <= 4000)
+    total_orig_w = np.sum(psd_orig) + 1e-10
+    total_proc_w = np.sum(psd_proc) + 1e-10
+
+    sib_orig = np.sum(psd_orig[sib_mask]) / total_orig_w
+    sib_proc = np.sum(psd_proc[sib_mask]) / total_proc_w
+    sib_reduction = (sib_orig - sib_proc) / (sib_orig + 1e-10)
+
+    clarity_orig = np.sum(psd_orig[clarity_mask]) / total_orig_w
+    clarity_proc = np.sum(psd_proc[clarity_mask]) / total_proc_w
+    clarity_change = (clarity_proc - clarity_orig) / (clarity_orig + 1e-10)
+
+    # --- Plosive harshness (on processed) ---
+    onsets = _detect_transients(proc_short, sr)
+    plosive_harsh, n_transients = _plosive_harshness(proc_short, sr, onsets)
+    # Also measure on original for comparison
+    onsets_orig = _detect_transients(orig_short, sr)
+    plosive_harsh_orig, _ = _plosive_harshness(orig_short, sr, onsets_orig)
+    plosive_delta = plosive_harsh - plosive_harsh_orig
+
+    # --- Noise floor comparison ---
+    # Measure RMS in quiet portions (bottom 10% energy frames)
+    win = int(0.025 * sr)
+    hop_n = int(0.010 * sr)
+    frames_orig = [orig_short[i:i+win] for i in range(0, min_len - win, hop_n)]
+    frames_proc = [proc_short[i:i+win] for i in range(0, min_len - win, hop_n)]
+    rms_orig = np.array([np.sqrt(np.mean(f**2)) for f in frames_orig])
+    rms_proc = np.array([np.sqrt(np.mean(f**2)) for f in frames_proc])
+    quiet_thresh = np.percentile(rms_orig, 10)
+    quiet_mask = rms_orig <= quiet_thresh
+    if np.sum(quiet_mask) > 2:
+        noise_orig = 20 * np.log10(np.mean(rms_orig[quiet_mask]) + 1e-10)
+        noise_proc = 20 * np.log10(np.mean(rms_proc[quiet_mask]) + 1e-10)
+        noise_reduction = noise_orig - noise_proc
+    else:
+        noise_orig = noise_proc = noise_reduction = 0.0
+
+    # --- Full quality metrics on both ---
+    orig_metrics = analyze_clip(orig_path)
+    proc_metrics = analyze_clip(proc_path)
+
+    result = {
+        'file': Path(orig_path).name,
+        'dur_orig': round(len(orig) / sr, 2),
+        'dur_proc': round(len(proc) / sr, 2),
+        # Difference signal energy by band
+        'artifact_low': round(artifact_low, 6),
+        'artifact_mid': round(artifact_mid, 6),
+        'artifact_high': round(artifact_high, 6),
+        'artifact_total': round(artifact_total, 6),
+        # De-essing
+        'sib_reduction_%': round(sib_reduction * 100, 2),
+        'clarity_change_%': round(clarity_change * 100, 2),
+        # Plosives
+        'plosive_harsh_db': round(plosive_harsh, 1),
+        'plosive_delta_db': round(plosive_delta, 1),
+        'n_transients': n_transients,
+        # Noise
+        'noise_orig_db': round(noise_orig, 1),
+        'noise_proc_db': round(noise_proc, 1),
+        'noise_reduction_db': round(noise_reduction, 1),
+    }
+
+    # Add full metrics as orig_* and proc_*, plus delta_*
+    skip_keys = {'file', 'dur'}
+    for key in orig_metrics:
+        if key in skip_keys:
+            continue
+        oval = orig_metrics[key]
+        pval = proc_metrics.get(key)
+        result[f'orig_{key}'] = oval
+        result[f'proc_{key}'] = pval
+        if oval is not None and pval is not None and isinstance(oval, (int, float)) and isinstance(pval, (int, float)):
+            result[f'delta_{key}'] = round(pval - oval, 4)
+
+    return result
+
+
+COMPARE_METRICS = [
+    ("ARTIFACTS", [
+        ('artifact_total', 'Artifact total', '.6f', 'Total difference signal energy / original energy'),
+        ('artifact_mid', 'Artifact 2-4k', '.6f', 'Difference energy in harshness band'),
+        ('artifact_high', 'Artifact 4-10k', '.6f', 'Difference energy in sibilance band'),
+    ]),
+    ("DE-ESSING", [
+        ('sib_reduction_%', 'Sibilance reduction %', '.2f', '>0 = less sibilance. Negative = added sibilance'),
+        ('clarity_change_%', 'Clarity change %', '.2f', 'Change in 1-4kHz. Should stay near 0'),
+    ]),
+    ("PLOSIVES", [
+        ('plosive_harsh_db', 'Plosive burst dB', '.1f', 'Transient energy in 3-6kHz vs clip average'),
+        ('plosive_delta_db', 'Plosive delta dB', '.1f', 'Change from original. >0 = harsher plosives'),
+        ('n_transients', 'Transients found', '.0f', 'Number of detected transient onsets'),
+    ]),
+    ("NOISE", [
+        ('noise_orig_db', 'Noise floor orig', '.1f', 'RMS in quiet frames (original)'),
+        ('noise_proc_db', 'Noise floor proc', '.1f', 'RMS in quiet frames (processed)'),
+        ('noise_reduction_db', 'Noise reduction dB', '.1f', '>0 = quieter noise floor'),
+    ]),
+]
+
+
+def print_compare_summary(results, label):
+    print(f"\n{'='*95}")
+    print(f"  COMPARE: {label}  ({len(results)} clip pairs)")
+    print(f"{'='*95}")
+
+    for group_name, metrics in COMPARE_METRICS:
+        print(f"\n  --- {group_name} ---")
+        print(f"  {'Metric':<25} {'Mean':>10} {'Median':>10} {'Min':>10} {'Max':>10} {'StdDev':>10}")
+        print(f"  {'-'*75}")
+        for key, name, fmt, _ in metrics:
+            vals = [r[key] for r in results if r.get(key) is not None]
+            if not vals:
+                print(f"  {name:<25} {'n/a':>10}")
+                continue
+            print(f"  {name:<25} {np.mean(vals):>10{fmt}} {np.median(vals):>10{fmt}} "
+                  f"{np.min(vals):>10{fmt}} {np.max(vals):>10{fmt}} {np.std(vals):>10{fmt}}")
+
+    # Full quality metric deltas (orig → proc)
+    DELTA_METRICS = [
+        ("LEVELS (delta)", [
+            ('delta_peak_db', 'Δ Peak dBFS', '.1f'),
+            ('delta_rms_db', 'Δ RMS dBFS', '.1f'),
+            ('delta_lufs', 'Δ LUFS', '.1f'),
+        ]),
+        ("SPECTRUM (delta)", [
+            ('delta_centroid_hz', 'Δ Centroid Hz', '.0f'),
+            ('delta_harsh_2_4k', 'Δ Harsh 2-4kHz', '.4f'),
+            ('delta_sib_4_10k', 'Δ Sibilance 4-10k', '.4f'),
+            ('delta_presence_1_5k', 'Δ Presence 1-5k', '.4f'),
+            ('delta_tilt_db_oct', 'Δ Tilt dB/oct', '.2f'),
+            ('delta_air_10k', 'Δ Air 10k+', '.4f'),
+        ]),
+        ("VOICE QUALITY (delta)", [
+            ('delta_hnr_db', 'Δ HNR dB', '.1f'),
+            ('delta_jitter_pct', 'Δ Jitter %', '.3f'),
+            ('delta_shimmer_pct', 'Δ Shimmer %', '.2f'),
+        ]),
+        ("PERCEPTUAL (delta)", [
+            ('delta_dnsmos_sig', 'Δ DNSMOS SIG', '.2f'),
+            ('delta_dnsmos_bak', 'Δ DNSMOS BAK', '.2f'),
+            ('delta_dnsmos_ovrl', 'Δ DNSMOS OVRL', '.2f'),
+        ]),
+    ]
+
+    for group_name, metrics in DELTA_METRICS:
+        print(f"\n  --- {group_name} ---")
+        print(f"  {'Metric':<25} {'Mean':>10} {'Median':>10} {'Min':>10} {'Max':>10} {'StdDev':>10}")
+        print(f"  {'-'*75}")
+        for key, name, fmt in metrics:
+            vals = [r[key] for r in results if r.get(key) is not None]
+            if not vals:
+                print(f"  {name:<25} {'n/a':>10}")
+                continue
+            print(f"  {name:<25} {np.mean(vals):>10{fmt}} {np.median(vals):>10{fmt}} "
+                  f"{np.min(vals):>10{fmt}} {np.max(vals):>10{fmt}} {np.std(vals):>10{fmt}}")
+
+    # Flag outliers
+    print(f"\n  --- FLAGGED CLIPS ---")
+    flagged = []
+    for r in results:
+        issues = []
+        if r.get('plosive_delta_db', 0) > 8.0:
+            issues.append(f"plosive+{r['plosive_delta_db']:.1f}dB")
+        if r.get('clarity_change_%', 0) < -15.0:
+            issues.append(f"clarity{r['clarity_change_%']:+.1f}%")
+        if r.get('artifact_total', 0) > 5.0:
+            issues.append(f"artifact={r['artifact_total']:.4f}")
+        if issues:
+            flagged.append((r['file'], issues))
+    if flagged:
+        for fname, issues in sorted(flagged):
+            print(f"  ⚠ {fname}: {', '.join(issues)}")
+    else:
+        print(f"  None — all clips within thresholds")
+
+
 METRIC_GROUPS = [
     ("LEVELS", [
         ('peak_db', 'Peak dBFS', '.1f'),
@@ -301,46 +577,129 @@ def print_summary(results, label):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", required=True, help="Directory of WAV files")
-    parser.add_argument("--label", default=None, help="Label for this source")
+    parser.add_argument("--source", default=None, help="Directory of WAV files (single-source mode)")
+    parser.add_argument("--label", default=None, help="Label for this analysis")
     parser.add_argument("--n", type=int, default=None, help="Sample N clips evenly")
     parser.add_argument("--json", default=None, help="Save raw results to JSON")
+    # Compare mode
+    parser.add_argument("--compare", action="store_true", help="A/B comparison mode")
+    parser.add_argument("--original", default=None, help="Directory of original clips")
+    parser.add_argument("--processed", default=None, help="Directory of processed clips (or multiple, comma-separated)")
+    parser.add_argument("--match-suffix", default=None, help="Suffix to match in processed dir (e.g. '_3_new')")
+    parser.add_argument("--original-suffix", default=None, help="Suffix to match in original dir (e.g. '_1_original')")
     args = parser.parse_args()
 
-    source = Path(args.source)
-    label = args.label or source.name
+    if args.compare:
+        if not args.original or not args.processed:
+            print("Compare mode requires --original and --processed")
+            return
 
-    if not source.exists():
-        print(f"Error: {source} not found")
-        return
+        orig_dir = Path(args.original)
+        proc_dirs = [Path(p.strip()) for p in args.processed.split(',')]
 
-    wavs = sorted(f for f in source.iterdir() if f.suffix == '.wav')
-    if not wavs:
-        print(f"No WAV files in {source}")
-        return
+        for proc_dir in proc_dirs:
+            label = args.label or f"{orig_dir.name} → {proc_dir.name}"
 
-    if args.n and args.n < len(wavs):
-        indices = np.linspace(0, len(wavs) - 1, args.n, dtype=int)
-        wavs = [wavs[i] for i in indices]
+            orig_wavs = sorted(f for f in orig_dir.iterdir() if f.suffix == '.wav')
+            proc_wavs = sorted(f for f in proc_dir.iterdir() if f.suffix == '.wav')
 
-    print(f"\nAnalyzing {len(wavs)} clips from {source}...")
+            # Build lookup by clip name
+            def clip_key(path, suffix=None):
+                name = path.stem
+                if suffix and name.endswith(suffix):
+                    name = name[:-len(suffix)]
+                return name
 
-    results = []
-    for i, path in enumerate(wavs):
-        try:
-            r = analyze_clip(path)
-            results.append(r)
-        except Exception as e:
-            print(f"  SKIP {path.name}: {e}", file=sys.stderr)
-        if (i + 1) % 25 == 0:
-            print(f"  [{i+1}/{len(wavs)}]")
+            orig_map = {clip_key(w, args.original_suffix): w for w in orig_wavs}
+            proc_map = {clip_key(w, args.match_suffix): w for w in proc_wavs}
 
-    print_summary(results, label)
+            # Find matching pairs
+            common = sorted(set(orig_map.keys()) & set(proc_map.keys()))
+            if not common:
+                # Fallback: match by position if names don't align
+                common_by_pos = list(zip(sorted(orig_map.values()), sorted(proc_map.values())))
+                if common_by_pos:
+                    print(f"No name matches found, falling back to positional matching ({len(common_by_pos)} pairs)")
+                    pairs = common_by_pos
+                else:
+                    print(f"No matching clips between {orig_dir} and {proc_dir}")
+                    continue
+            else:
+                pairs = [(orig_map[k], proc_map[k]) for k in common]
 
-    if args.json:
-        with open(args.json, 'w') as f:
-            json.dump(results, f, indent=2)
-        print(f"\nRaw results saved to {args.json}")
+            if args.n and args.n < len(pairs):
+                indices = np.linspace(0, len(pairs) - 1, args.n, dtype=int)
+                pairs = [pairs[i] for i in indices]
+
+            print(f"\nComparing {len(pairs)} clip pairs: {orig_dir.name} → {proc_dir.name}")
+
+            results = []
+            skipped = []
+            for i, (orig_path, proc_path) in enumerate(pairs):
+                try:
+                    r = compare_clips(orig_path, proc_path)
+                    if r and r.get('_skipped'):
+                        skipped.append(r)
+                    elif r:
+                        results.append(r)
+                except Exception as e:
+                    print(f"  SKIP {orig_path.name}: {e}", file=sys.stderr)
+                if (i + 1) % 50 == 0:
+                    print(f"  [{i+1}/{len(pairs)}]", flush=True)
+
+            if skipped:
+                print(f"\n  Skipped {len(skipped)} short clips (<1.5s): "
+                      + ", ".join(r['file'] for r in skipped[:10])
+                      + ("..." if len(skipped) > 10 else ""))
+
+            if results:
+                print_compare_summary(results, label)
+
+            if args.json:
+                json_path = args.json if len(proc_dirs) == 1 else f"{Path(args.json).stem}_{proc_dir.name}.json"
+                with open(json_path, 'w') as f:
+                    json.dump(results, f, indent=2)
+                print(f"\nRaw results saved to {json_path}")
+
+    else:
+        if not args.source:
+            print("Single-source mode requires --source")
+            return
+
+        source = Path(args.source)
+        label = args.label or source.name
+
+        if not source.exists():
+            print(f"Error: {source} not found")
+            return
+
+        wavs = sorted(f for f in source.iterdir() if f.suffix == '.wav')
+        if not wavs:
+            print(f"No WAV files in {source}")
+            return
+
+        if args.n and args.n < len(wavs):
+            indices = np.linspace(0, len(wavs) - 1, args.n, dtype=int)
+            wavs = [wavs[i] for i in indices]
+
+        print(f"\nAnalyzing {len(wavs)} clips from {source}...")
+
+        results = []
+        for i, path in enumerate(wavs):
+            try:
+                r = analyze_clip(path)
+                results.append(r)
+            except Exception as e:
+                print(f"  SKIP {path.name}: {e}", file=sys.stderr)
+            if (i + 1) % 25 == 0:
+                print(f"  [{i+1}/{len(wavs)}]")
+
+        print_summary(results, label)
+
+        if args.json:
+            with open(args.json, 'w') as f:
+                json.dump(results, f, indent=2)
+            print(f"\nRaw results saved to {args.json}")
 
 
 if __name__ == "__main__":
