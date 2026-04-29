@@ -31,8 +31,7 @@ import mlx.core as mx
 from mlx_audio.tts import load
 from mlx_lm.sample_utils import categorical_sampling
 
-DEFAULT_CHECKPOINT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                  "checkpoints", "holler-kit-dakota-6bit")
+DEFAULT_CHECKPOINT = "sentium/holler-0.6b-6bit"
 DEFAULT_PORT = 8100
 CHECKPOINT = DEFAULT_CHECKPOINT
 PORT = DEFAULT_PORT
@@ -80,7 +79,23 @@ def _mlx_worker():
 
     print(f"[holler] Loading model from {CHECKPOINT}...", flush=True)
     t0 = time.time()
-    model = load(CHECKPOINT)
+    try:
+        model = load(CHECKPOINT)
+    except Exception as e:
+        cache_slug = CHECKPOINT.replace("/", "_")
+        cache_path = Path.home() / ".cache" / "huggingface" / "mlx-audio" / cache_slug
+        if cache_path.exists():
+            print(f"[holler] HuggingFace download failed, using cached model at {cache_path}", flush=True)
+            model = load(str(cache_path))
+        else:
+            msg = str(e)
+            if "401" in msg or "404" in msg or "does not exist" in msg.lower():
+                print(f"[holler] Error: could not download '{CHECKPOINT}' from HuggingFace.", flush=True)
+                print(f"[holler] Use -c to load a local checkpoint instead:", flush=True)
+                print(f"[holler]   python3 inference/server.py -c path/to/checkpoint", flush=True)
+            else:
+                print(f"[holler] Error loading model: {e}", flush=True)
+            os._exit(1)
     mx.set_cache_limit(2 * 1024 * 1024 * 1024)
 
     global available_voices, DEFAULT_VOICE
@@ -751,7 +766,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Holler TTS Server")
     parser.add_argument("--checkpoint", "-c", default=DEFAULT_CHECKPOINT,
-                        help="Path to model checkpoint directory")
+                        help="Local path or HuggingFace repo (default: sentium/holler-0.6b-6bit)")
     parser.add_argument("--port", "-p", type=int, default=DEFAULT_PORT,
                         help="Server port (default: 8100)")
     parser.add_argument("--voice", "-v", default=None,

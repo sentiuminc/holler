@@ -72,7 +72,7 @@ curl "http://localhost:8100/tts?text=Hello+world&voice=kit" -o hello.wav
 ```
 python3 inference/server.py [options]
 
-  --checkpoint, -c PATH   Model checkpoint directory (default: auto-detect)
+  --checkpoint, -c PATH   Model checkpoint or HuggingFace repo (default: sentium/holler-0.6b-6bit)
   --port, -p PORT         Server port (default: 8100)
   --voice, -v NAME        Default voice (default: first voice in checkpoint)
   --no-ui                 Disable browser test UI at /

@@ -110,12 +110,9 @@ holler/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Download checkpoint (or use local)
-# TODO: huggingface-cli download sentium/holler-0.6b-6bit --local-dir checkpoints/holler-6bit
-
-# 3. Run server (default checkpoint or specify one)
+# 2. Run server (auto-downloads sentium/holler-0.6b-6bit from HuggingFace on first run)
 python3 inference/server.py
-python3 inference/server.py --checkpoint path/to/checkpoint --port 8100 --voice kit
+python3 inference/server.py -c path/to/local/checkpoint --voice kit
 # → http://localhost:8100
 
 # 4. Test
