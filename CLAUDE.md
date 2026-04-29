@@ -115,7 +115,7 @@ pip install -r requirements.txt
 
 # 3. Run server (default checkpoint or specify one)
 python3 inference/server.py
-python3 inference/server.py --checkpoint path/to/checkpoint --port 8100
+python3 inference/server.py --checkpoint path/to/checkpoint --port 8100 --voice kit
 # → http://localhost:8100
 
 # 4. Test
@@ -126,11 +126,12 @@ curl http://localhost:8100/benchmark
 ### API
 
 ```
-POST /tts        — streaming float32 PCM (24kHz mono), chunked transfer encoding
-  Body: {"text": "...", "voice": "katie", "temperature": 0.6, "n_codebooks": 12}
-GET  /tts?text=  — returns WAV file
+POST /speak      — streaming float32 PCM (24kHz mono), chunked transfer encoding
+  Body: {"text": "...", "voice": "kit", "temperature": 0.6, "n_codebooks": 12}
+GET  /tts?text=  — returns complete WAV file
 GET  /benchmark  — runs 6-sentence benchmark, returns text report
-GET  /health     — {"status": "ok"}
+GET  /health     — {"status": "ok", "model": "...", "voices": [...]}
+GET  /           — browser test UI (disable with --no-ui)
 ```
 
 ### Performance (M1 Pro, Katie v6 6-bit affine)
