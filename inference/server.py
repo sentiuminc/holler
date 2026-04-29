@@ -115,6 +115,9 @@ def _mlx_worker():
                     pass
             continue
 
+        if item is None:
+            break
+
         response_q, cancel_event, kwargs = item
         try:
             for audio_chunk in generate_audio(model, **kwargs):
@@ -786,8 +789,10 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[holler] Shutting down.", flush=True)
+        print("\n[holler] Shutting down...", flush=True)
         server.shutdown()
+        inference_queue.put(None)
+        print("[holler] Done.", flush=True)
 
 
 if __name__ == "__main__":
