@@ -279,7 +279,7 @@ async function speakOne(text, continueP) {
 
   const body = JSON.stringify({ text, voice, continue: continueP, temperature: temp });
 
-  const resp = await fetch(`${BASE}/tts`, {
+  const resp = await fetch(`${BASE}/speak`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,

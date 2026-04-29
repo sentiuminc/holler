@@ -4,8 +4,8 @@ Single source of truth for Holler inference. Used directly for open-source,
 imported by ivi's thin wrapper for product integration.
 
 API:
-  POST /tts  — streaming float32 PCM (24kHz mono), chunked transfer encoding
-  GET  /tts  — complete WAV file download
+  POST /speak — streaming float32 PCM (24kHz mono), chunked transfer encoding
+  GET  /tts   — complete WAV file download
   GET  /benchmark — 6-sentence RTF/TTFA benchmark
   GET  /health — JSON health check
   GET  / or /test — browser test UI
@@ -582,10 +582,9 @@ class TTSHandler(http.server.BaseHTTPRequestHandler):
         global last_request_time
         last_request_time = time.time()
 
-        if self.path != "/tts":
+        if self.path != "/speak":
             body = b'{"error":"not found"}'
             self.send_response(404)
-
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -746,7 +745,7 @@ def main():
     load_model()
     server = ThreadingServer(("0.0.0.0", PORT), TTSHandler)
     print(f"[holler] Server running on http://localhost:{PORT}", flush=True)
-    print(f"[holler] POST /tts — streaming float32 PCM", flush=True)
+    print(f"[holler] POST /speak — streaming float32 PCM", flush=True)
     print(f"[holler] GET  /tts?text=hello — WAV download", flush=True)
     print(f"[holler] GET  /benchmark — RTF benchmark", flush=True)
     print(f"[holler] GET  / — browser test UI", flush=True)
