@@ -279,7 +279,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Needs Tinder curation pass.
 ### HollerKit (Swift)
 
-6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification (old generation task may still be touching decoder).
+6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification in Swift (old generation task may still be touching decoder). **Same bug confirmed in Python server** — fix both in parallel.
 7. **Move Package.swift to repo root** — SPM requires it at root for `gh repo` consumption. Move `swift/HollerKit/Sources/` → `Sources/`, adjust paths. Python/training/voices coexist fine.
 8. **Push holler to sentiuminc/holler** — create public repo, `git remote add origin`, push. Repo is ready (39 commits, .gitignore covers checkpoints/audio/builds).
 9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
