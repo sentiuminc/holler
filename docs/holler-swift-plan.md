@@ -248,6 +248,197 @@ swift build -c release --product mlx-audio-swift-tts --disable-sandbox
 - mlx-audio-swift builds cleanly: `swift build -c release --product mlx-audio-swift-tts --disable-sandbox` (~4 min first build)
 - Metallib build: `./scripts/build_mlx_metallib.sh release` (speech-swift has this script, mlx-audio-swift expects Xcode to produce it)
 
+## HollerKit Package Implementation
+
+### Package Location & Dependency
+
+Lives at `holler/swift/HollerKit/`. Depends on our fork of mlx-audio-swift via local path dependency (`../../../mlx-audio-swift`). When we PR optimizations upstream to Blaizzy/mlx-audio-swift, switch to URL dependency.
+
+```swift
+// Package.swift (key parts)
+dependencies: [
+    .package(path: "../../../mlx-audio-swift"),  // Our fork with optimizations
+    // Future: .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", from: "x.y.z"),
+]
+```
+
+### Package Structure
+
+```
+holler/swift/HollerKit/
+├── Package.swift
+├── Sources/
+│   ├── HollerKit/
+│   │   ├── HollerModel.swift          — Public API (actor): load, stream, synthesize, unload
+│   │   ├── HollerConfiguration.swift  — All tunables with Python-parity defaults
+│   │   ├── HollerAudioChunk.swift     — Chunk/Audio types yielded by stream
+│   │   ├── HollerError.swift          — Error types
+│   │   ├── SilenceAnalyzer.swift      — RMS speech detection, onset finding
+│   │   ├── AudioPostProcessor.swift   — Onset trim, 20ms fadeout, silence generation
+│   │   ├── RetryController.swift      — Escalating temperature retry (up to 3x)
+│   │   ├── InferenceActor.swift       — Actor serializing all MLX calls
+│   │   ├── GenerationSession.swift    — Single generation + 4-piece silence pipeline
+│   │   └── ContinuousSession.swift    — Multi-sentence KV cache carryover + pause injection
+│   └── HollerCLI/
+│       └── HollerCLIApp.swift         — `holler` CLI binary
+└── Tests/
+    └── HollerKitTests/
+        ├── SilenceAnalyzerTests.swift
+        └── AudioPostProcessorTests.swift
+```
+
+### What Each File Ports from Python (server.py)
+
+| Python (server.py) | Swift (HollerKit) | Notes |
+|---|---|---|
+| `_has_speech()` L173-183 | `SilenceAnalyzer.hasSpeech()` | 2-of-3 RMS window confirmation |
+| `_find_speech_onset()` L186-204 | `SilenceAnalyzer.findSpeechOnset()` | 10ms windows, 150ms pre-roll |
+| `_apply_trailing_fadeout()` L207-214 | `AudioPostProcessor.applyFadeOut()` | 20ms linear fade-out |
+| `_run_generation()` L217-419 | `GenerationSession.run()` | 4-piece silence pipeline |
+| `generate_audio()` L424-484 | `RetryController` + `HollerModel.stream()` | 3x retry, escalating temp |
+| `_mlx_worker()` L76-146 | `InferenceActor` | Swift actor (not thread+queue) |
+| `_carry_over_state` L422 | `ContinuousSession` | KV cache persistence (Phase 2) |
+| Carryover pause 150-250ms L369-374 | `ContinuousSession` | Random pause injection (Phase 2) |
+
+### 4-Piece Silence Pipeline (GenerationSession)
+
+Port of `_run_generation()` from server.py. Wraps `Qwen3TTSModel.generateStream()` and processes raw audio chunks:
+
+1. **Piece 1:** Skip silent chunks before speech (codec warmup removal)
+2. **Piece 2:** Sample-level onset trim in first speech chunk — 10ms RMS windows, 2-of-3 confirmation, 150ms pre-roll
+3. **Piece 3:** 20ms linear fade-out on final chunk
+4. **Piece 4:** Post-speech silence buffer + abort after `SILENT_ABORT_TOKENS` (16 tokens)
+
+Plus: short audio detection (`minAudioSecondsPerWord: 0.08`) and retry with escalating temperature (+0.1 per attempt, max 3 retries).
+
+### Thread Safety: Swift Actor vs Python Worker Queue
+
+Python uses `_mlx_worker()` — a single persistent thread reading from `inference_queue`. All MLX calls happen on that one thread to avoid Metal thread-safety issues (mlx#2086).
+
+Swift uses an `actor` (`InferenceActor`). The actor guarantees serialized access — only one caller executes at a time. Same safety, idiomatic Swift, no manual queue management.
+
+### Implementation Phases
+
+**Phase 1 — No mlx-audio-swift changes needed:**
+
+Everything below works from the existing public `generateStream` API on `Qwen3TTSModel`.
+
+1. Package.swift + types (Configuration, AudioChunk, Error)
+2. SilenceAnalyzer + AudioPostProcessor — pure `[Float]` functions, unit testable without model
+3. RetryController — decision logic, unit testable
+4. InferenceActor + HollerModel (load/unload/voices)
+5. GenerationSession — 4-piece silence pipeline wrapping `generateStream`
+6. Wire it all: `HollerModel.stream()` + `synthesize()`
+7. `holler` CLI binary
+
+**Phase 2 — Needs mlx-audio-swift PR (TalkerCacheState):**
+
+KV cache carryover requires new public API on `Qwen3TTSModel`:
+
+```swift
+public struct TalkerCacheState: @unchecked Sendable {
+    let cache: [any KVCache]
+    let offset: Int
+}
+
+// New generateStream overload accepting carryOverCache
+```
+
+The Python server's `first_call_mask` causal mask extension (server.py L271-279) must also be ported.
+
+8. PR `TalkerCacheState` + `carryOverCache` param to mlx-audio-swift
+9. ContinuousSession (KV cache persistence + 150-250ms pause injection)
+10. `HollerModel.streamContinuous()`
+
+### `holler` CLI Design
+
+```
+holler --text "Hello world" --voice kit [options]
+holler --benchmark [options]
+
+Options:
+  --text, -t <string>         Text to synthesize (required unless --benchmark)
+  --voice, -v <name>          Voice name (default: first available)
+  --model, -m <path-or-repo>  Model path or HF repo (default: sentium/holler-0.6b-6bit)
+  --output, -o <path>         Output WAV path (default: output.wav)
+  --codebooks <int>           Number of codebooks 1-16 (default: 12)
+  --temperature <float>       Sampling temperature (default: 0.6)
+  --top-k <int>               Top-k sampling (default: 50)
+  --max-tokens <int>          Maximum tokens (default: 500)
+  --no-retry                  Disable retry logic
+  --no-silence-trim           Disable silence trimming
+  --benchmark                 Run 6-sentence benchmark
+  --help, -h                  Show help
+```
+
+Key difference from `mlx-audio-swift-tts`: the `holler` CLI produces production-quality audio (silence-trimmed, faded, retried). Default codebooks = 12 (fast). `mlx-audio-swift-tts` is a raw model exerciser.
+
+### HollerKit Public API
+
+```swift
+import HollerKit
+
+// Load model (~2s: weights + Metal warmup)
+let model = try await HollerModel.load(from: "/path/to/holler-6bit")
+// or: let model = try await HollerModel.load(repo: "sentium/holler-0.6b-6bit")
+
+model.voices        // ["kit", "dakota"]
+model.isLoaded      // true
+
+// Full synthesis (returns when complete)
+let audio = try await model.synthesize("Hello world", voice: "kit")
+// audio.samples: [Float], audio.sampleRate: 24000
+
+// Streaming (silence-trimmed, faded, retried)
+for try await chunk in model.stream("Hello world", voice: "kit") {
+    player.schedule(chunk.samples)
+}
+
+// Multi-sentence continuity (Phase 2 — KV cache carryover)
+for try await chunk in model.streamContinuous("First sentence.", voice: "kit") {
+    player.schedule(chunk.samples)
+}
+for try await chunk in model.streamContinuous("Second sentence.", voice: "kit") {
+    player.schedule(chunk.samples)  // prosody continues naturally
+}
+model.resetContinuousSession()
+
+// Configuration
+model.configuration.temperature = 0.6
+model.configuration.codebooks = 12
+model.configuration.maxRetries = 3
+
+// Memory management
+model.unload()       // releases ~1.7GB GPU memory
+```
+
+### Configuration Defaults (matching Python server.py)
+
+```swift
+public struct HollerConfiguration: Sendable {
+    public var temperature: Float = 0.6
+    public var topK: Int = 50
+    public var codebooks: Int = 12               // server.py DEFAULT_CODEBOOKS
+    public var maxTokens: Int = 500              // server.py MAX_TOKENS
+    public var streamingChunkTokens: Int = 3     // server.py STREAM_CHUNK_TOKENS
+
+    // Silence handling
+    public var silentAbortTokens: Int = 16       // server.py SILENT_ABORT_TOKENS
+    public var speechOnsetThresholdRMS: Float = 0.007
+    public var speechOnsetPreRollMs: Float = 150
+    public var fadeOutMs: Float = 20
+
+    // Retry
+    public var maxRetries: Int = 3
+    public var retryTemperatureStep: Float = 0.1
+    public var minAudioSecondsPerWord: Float = 0.08
+
+    // Carryover (Phase 2)
+    public var carryoverPauseMinMs: Int = 150    // server.py CARRYOVER_PAUSE_MIN_MS
+    public var carryoverPauseMaxMs: Int = 250    // server.py CARRYOVER_PAUSE_MAX_MS
+}
+```
+
 ## Model Distribution (Holler.app)
 
 The model checkpoint (~1.1GB 6-bit) downloads separately on first launch — not bundled in the app.

@@ -16,5 +16,9 @@ __pycache__/
 *.pyc
 .venv*/
 
+# Swift
+swift/HollerKit/.build/
+swift/HollerKit/Package.resolved
+
 # OS
 .DS_Store
