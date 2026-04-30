@@ -21,6 +21,7 @@ struct HollerCLI {
         var tokenDelayMs: UInt64 = 15
         var benchmark = false
         var debug = false
+        var talk = false
 
         while let arg = it.next() {
             switch arg {
@@ -71,6 +72,8 @@ struct HollerCLI {
                 tokenDelayMs = n
             case "--debug":
                 debug = true
+            case "--talk":
+                talk = true
             case "--help", "-h":
                 printUsage()
                 return
@@ -104,12 +107,21 @@ struct HollerCLI {
         let voices = await hollerModel.voices
         print("[holler] Ready in \(String(format: "%.1f", loadTime))s — voices: \(voices)")
 
+        let effectiveOutput = talk
+            ? NSTemporaryDirectory() + "holler-\(ProcessInfo.processInfo.processIdentifier).wav"
+            : output
+
         if benchmark {
             try await runBenchmark(model: hollerModel, voice: voice)
         } else if session {
-            try await runSession(model: hollerModel, text: text!, voice: voice, output: output, tokenDelayMs: tokenDelayMs)
+            try await runSession(model: hollerModel, text: text!, voice: voice, output: effectiveOutput, tokenDelayMs: tokenDelayMs)
         } else {
-            try await runSynthesize(model: hollerModel, text: text!, voice: voice, output: output)
+            try await runSynthesize(model: hollerModel, text: text!, voice: voice, output: effectiveOutput)
+        }
+
+        if talk {
+            try playAudio(path: effectiveOutput)
+            try? FileManager.default.removeItem(atPath: effectiveOutput)
         }
 
         await hollerModel.unload()
@@ -280,16 +292,16 @@ struct HollerCLI {
         holler — Production-quality TTS for Holler voices
 
         Usage:
-          holler --text "Hello world" [options]
-          holler --session --text "Simulate LLM streaming" [options]
-          holler --benchmark [options]
-
-        Modes:
-          --text, -t <string>         Text to synthesize
-          --session                   LLM streaming simulation (token-by-token feed)
-          --benchmark                 Run 6-sentence streaming benchmark
+          holler --text "Hello world"                   Synthesize to output.wav
+          holler --text "Hello world" --talk             Synthesize and play through speakers
+          holler --session --text "Long paragraph."      LLM streaming simulation
+          holler --benchmark                             Run 6-sentence benchmark
 
         Options:
+          --text, -t <string>         Text to synthesize
+          --talk                      Play audio through speakers instead of saving
+          --session                   LLM streaming simulation (token-by-token feed)
+          --benchmark                 Run 6-sentence streaming benchmark
           --voice, -v <name>          Voice name (default: kit)
           --model, -m <path-or-repo>  Model path or HF repo (default: sentium/holler-0.6b-6bit)
           --output, -o <path>         Output WAV path (default: output.wav)
@@ -303,6 +315,14 @@ struct HollerCLI {
           --debug                     Enable verbose debug logging
           --help, -h                  Show help
         """)
+    }
+
+    static func playAudio(path: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        process.arguments = [path]
+        try process.run()
+        process.waitUntilExit()
     }
 
     static func exitError(_ message: String) -> Never {

@@ -18,7 +18,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-04-28)
+## Current State (2026-04-30)
 
 - **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only. Now with `--save_every_steps` for fractional epoch checkpoints.
 - **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
@@ -26,7 +26,8 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Voices confirmed for Holler v1:** Kit (Prism), Dakota (Trail Guide), plus 8 more TBD from 22 curated candidates.
 - **Training data generated on GPU:** Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF. Scripts at `training/remote_generate_training_data.py` + `training/corpus.json`. **Do NOT use `faster-qwen3-tts` for voice cloning** — it breaks voice identity.
 - **Quantization:** 6-bit affine g64 is the pick.
-- **Inference runtime:** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
+- **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
+- **Inference runtime (Swift):** HollerKit library at `swift/HollerKit/`. Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
 - **Auto-curate thresholds need male adjustment:** Current thresholds reject 100% of male voice clips. HNR < 14 and harshness > 2% are female-calibrated. Proposed male: HNR > 8, harshness < 5%, peak > -2.
 - **Training data tools:** Full pipeline automated — `tools/regenerate_rejects.py`, `tools/enhance_clips.py`, `tools/trim_and_merge.py`, `tools/curate_clips.py`.
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
@@ -81,6 +82,10 @@ holler/
 │   ├── benchmark-katie-v6-{bf16,4bit}/ — older benchmark clips
 │   ├── v6-mlx/, v6-pytorch/, v5/   — earlier samples
 │   └── v7-{mlx,pytorch}-{katie,joe}/ — multi-voice samples
+├── swift/HollerKit/       — Swift package: HollerKit library + CLI
+│   ├── Package.swift              — SPM manifest (local dep on mlx-audio-swift)
+│   ├── Sources/HollerKit/         — Library: HollerModel, SpeechSession, StreamingPipeline
+│   └── Sources/HollerCLI/         — CLI: holler --text/--session/--benchmark/--talk
 ├── logs/                  — DEPRECATED: session logs now live in ivi repo at ivi/logs/
 │   ├── sessions/          — Old session logs (moved to ivi/logs/)
 │   └── runs/              — Raw training/inference logs
@@ -163,6 +168,43 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 **Live demo:** `inference/live_demo.py` — HTTP server on port 8099, type text in browser, audio plays from Mac speakers.
 
 **Python venv:** `.venv` exists (Python 3.13). Has mlx-audio for inference, plus clearvoice/deepfilternet/noisereduce for audio enhancement. torch 2.6 + torchaudio 2.6 (pinned for DeepFilterNet compatibility).
+
+## HollerKit (Swift Package) — Phase 2B Complete
+
+Native Swift TTS library at `swift/HollerKit/`. Depends on `mlx-audio-swift` (local path `../../../mlx-audio-swift` during dev — switch to version pin when carryover API is tagged upstream).
+
+**Architecture:**
+```
+HollerModel.stream("text", voice:)  →  InferenceActor  →  mlx-audio-swift generateStream()
+         ↓                                    ↓                        ↓
+   AsyncThrowingStream<Chunk>       StreamingPipeline          Qwen3TTSModel + codec decoder
+         ↓                          (silence trim, abort,
+   Consumer (app/CLI)                fadeout, hold-one-back)
+```
+
+**SpeechSession (LLM integration):**
+```
+session.feed(token)  →  SentenceBuffer  →  per-sentence generation  →  session.audio stream
+                        (accumulate,        (carryover KV cache,        (chunks as they're ready)
+                         split on . ! ?)     retry on failure)
+```
+
+**Key files:**
+- `HollerModel.swift` — public API: `load()`, `stream()`, `synthesize()`, `makeSession()`
+- `SpeechSession.swift` — LLM integration: `feed()`, `finish()`, `cancel()`, `audio` stream
+- `SentenceBuffer.swift` — text accumulation + sentence boundary detection
+- `StreamingPipeline.swift` — silence onset trim, hold-one-back, fadeout, abort
+- `InferenceActor.swift` — serialized MLX access, streaming decode
+- `RetryController.swift` — retry evaluation (too short, no speech, give up)
+- `HollerConfiguration.swift` — all tunables + `log` closure for debug
+- `HollerCLIApp.swift` — CLI: `--text`, `--session`, `--benchmark`, `--talk`, `--debug`
+
+**Performance (release build, M1 Pro):** TTFA ~360ms (includes silence trim), RTF ~0.49.
+
+**Known issues (2026-04-30):**
+1. **Decoder stuttering on carryover** — "kkk" pattern. Root cause: decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix identified (~15 lines) but needs concurrency verification.
+2. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early ~20% of the time on short sentences with heavy carryover. Model-level, not pipeline-fixable.
+3. **Long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Detectable by audio characteristics, could be caught and retried.
 
 ## Known: 220ms Leading Silence
 
