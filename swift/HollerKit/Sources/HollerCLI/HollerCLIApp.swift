@@ -18,6 +18,8 @@ struct HollerCLI {
         var noRetry = false
         var noSilenceTrim = false
         var benchmark = false
+        var streamingTest = false
+        var sessionTest = false
 
         while let arg = it.next() {
             switch arg {
@@ -59,6 +61,10 @@ struct HollerCLI {
                 noSilenceTrim = true
             case "--benchmark":
                 benchmark = true
+            case "--streaming-test":
+                streamingTest = true
+            case "--session-test":
+                sessionTest = true
             case "--help", "-h":
                 printUsage()
                 return
@@ -67,8 +73,8 @@ struct HollerCLI {
             }
         }
 
-        if !benchmark && text == nil {
-            exitError("--text or --benchmark required. Use --help for usage.")
+        if !benchmark && !streamingTest && !sessionTest && text == nil {
+            exitError("--text, --benchmark, --streaming-test, or --session-test required. Use --help for usage.")
         }
 
         var config = HollerConfiguration()
@@ -89,7 +95,11 @@ struct HollerCLI {
         let voices = await hollerModel.voices
         print("[holler] Ready in \(String(format: "%.1f", loadTime))s — voices: \(voices)")
 
-        if benchmark {
+        if sessionTest {
+            try await runSessionTest(model: hollerModel, voice: voice)
+        } else if streamingTest {
+            try await runStreamingTest(model: hollerModel, voice: voice)
+        } else if benchmark {
             try await runBenchmark(model: hollerModel, voice: voice)
         } else {
             try await runSynthesize(model: hollerModel, text: text!, voice: voice, output: output)
@@ -168,6 +178,134 @@ struct HollerCLI {
         print("")
         print("Avg RTF: \(String(format: "%.3f", avgRTF)), Avg TTFA: \(String(format: "%.0f", avgTTFA))ms")
         print("Target RTF <= 0.50: \(avgRTF <= 0.50 ? "PASS" : "FAIL")")
+    }
+
+    static func runSessionTest(model: HollerModel, voice: String) async throws {
+        let tokens = [
+            "Sure", ".", " Let", " me", " check", " that", " for", " you", ".",
+            " I", " think", " the", " answer", " is", " forty", " two", ".",
+            " Does", " that", " help", "?",
+        ]
+
+        print("[session-test] Simulating LLM token stream (\(tokens.count) tokens)")
+        print("[session-test] Text: \(tokens.joined())")
+        print(String(repeating: "=", count: 70))
+
+        let session = model.makeSession(voice: voice)
+        let sampleRate = await model.sampleRate
+        let t0 = Date()
+
+        let stats = SessionStats()
+
+        let audioTask = Task {
+            for try await chunk in session.audio {
+                let count = await stats.recordChunk(chunk.samples.count, t0: t0)
+                let audioMs = Double(chunk.samples.count) / Double(sampleRate) * 1000
+                print("[session-test] Chunk \(count): \(chunk.samples.count) samples (\(String(format: "%.0f", audioMs))ms audio)")
+            }
+        }
+
+        for token in tokens {
+            session.feed(token)
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        await session.finish()
+
+        try await audioTask.value
+
+        let totalMs = Date().timeIntervalSince(t0) * 1000
+        let totalSamples = await stats.totalSamples
+        let chunkCount = await stats.chunkCount
+        let ttfa = await stats.ttfa
+        let audioS = Double(totalSamples) / Double(sampleRate)
+        print(String(repeating: "=", count: 70))
+        print("[session-test] \(chunkCount) chunks, \(totalSamples) samples (\(String(format: "%.1f", audioS))s audio)")
+        print("[session-test] TTFA: \(ttfa.map { String(format: "%.0f", $0) } ?? "—")ms, Total: \(String(format: "%.0f", totalMs))ms")
+        print("[session-test] Result: \(totalSamples > 0 ? "PASSED" : "FAILED")")
+    }
+
+    private actor SessionStats {
+        var totalSamples = 0
+        var chunkCount = 0
+        var ttfa: Double?
+
+        func recordChunk(_ samples: Int, t0: Date) -> Int {
+            if ttfa == nil {
+                ttfa = Date().timeIntervalSince(t0) * 1000
+            }
+            chunkCount += 1
+            totalSamples += samples
+            return chunkCount
+        }
+    }
+
+    static func runStreamingTest(model: HollerModel, voice: String) async throws {
+        let sentences = [
+            "Hey!",
+            "Got it.",
+            "What is on your mind?",
+            "Yeah, that is pretty common with voice input.",
+            "Something about the umami thing appeals to me.",
+            "Hold on, speak a couple sentences, release, and let me know if the gap is gone.",
+        ]
+
+        print("[streaming-test] Testing generateStream() with \(sentences.count) consecutive calls")
+        print("[streaming-test] This tests whether streaming works safely for back-to-back generation")
+        print(String(repeating: "=", count: 80))
+
+        let header = "# ".padding(toLength: 3, withPad: " ", startingAt: 0)
+            + "Text".padding(toLength: 42, withPad: " ", startingAt: 0)
+            + "  TTFA   Total  Chunks  Samples  Status"
+        print(header)
+        print(String(repeating: "-", count: 80))
+
+        var allPassed = true
+
+        for (i, text) in sentences.enumerated() {
+            let t0 = Date()
+            var status = "OK"
+
+            do {
+                let result = try await model.streamRaw(text, voice: voice)
+                let totalMs = Date().timeIntervalSince(t0) * 1000
+                let sampleRate = await model.sampleRate
+
+                let allSamples = result.chunks.flatMap { $0 }
+                let savePath = NSString(string: "~/Downloads/holler-streaming-test/\(String(format: "%02d", i + 1))-\(voice).wav").expandingTildeInPath
+                try writeWAV(samples: allSamples, sampleRate: sampleRate, path: savePath)
+
+                let display = String(text.prefix(41)).padding(toLength: 42, withPad: " ", startingAt: 0)
+                let ttfaStr = String(format: "%.0fms", result.ttfaMs).padding(toLength: 6, withPad: " ", startingAt: 0)
+                let totalStr = String(format: "%.0fms", totalMs).padding(toLength: 6, withPad: " ", startingAt: 0)
+                let chunksStr = String(result.chunks.count).padding(toLength: 6, withPad: " ", startingAt: 0)
+                let samplesStr = String(result.totalSamples).padding(toLength: 7, withPad: " ", startingAt: 0)
+                let audioMs = Double(result.totalSamples) / Double(sampleRate) * 1000
+
+                if result.totalSamples == 0 {
+                    status = "EMPTY"
+                    allPassed = false
+                } else if audioMs < 100 {
+                    status = "SHORT"
+                    allPassed = false
+                }
+
+                print("\(String(i + 1).padding(toLength: 3, withPad: " ", startingAt: 0))"
+                    + "\(display) \(ttfaStr) \(totalStr) \(chunksStr) \(samplesStr)  \(status)")
+            } catch {
+                status = "CRASH"
+                allPassed = false
+                let display = String(text.prefix(41)).padding(toLength: 42, withPad: " ", startingAt: 0)
+                print("\(String(i + 1).padding(toLength: 3, withPad: " ", startingAt: 0))"
+                    + "\(display)  —      —      —       —        \(status): \(error)")
+            }
+        }
+
+        print(String(repeating: "=", count: 80))
+        print("[streaming-test] Result: \(allPassed ? "ALL PASSED" : "FAILURES DETECTED")")
+        if allPassed {
+            print("[streaming-test] Streaming consecutive calls work safely!")
+            print("[streaming-test] Phase 2A can proceed with generateStream()")
+        }
     }
 
     static func writeWAV(samples: [Float], sampleRate: Int, path: String) throws {

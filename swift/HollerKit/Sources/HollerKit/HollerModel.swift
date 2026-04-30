@@ -33,7 +33,11 @@ public final class HollerModel: @unchecked Sendable {
     }
 
     /// Stream production-quality audio (silence-trimmed, faded, retried).
-    /// Yields a single chunk containing the complete processed audio.
+    /// Yields chunks as they are generated (~130ms TTFA for first chunk).
+    ///
+    /// Retry strategy: first attempt streams chunks directly to the caller.
+    /// If it aborts (no speech / too short), subsequent attempts collect all
+    /// chunks first to avoid yielding audio from a failed generation.
     public func stream(
         _ text: String,
         voice: String
@@ -59,52 +63,95 @@ public final class HollerModel: @unchecked Sendable {
                             ? config.temperature
                             : min(config.temperature + Float(attempt) * config.retryTemperatureStep, 1.0)
 
-                        let rawSamples = try await actor.generate(
-                            text: text,
-                            voice: voice,
-                            config: config,
-                            temperature: temp
-                        )
-
-                        let result = GenerationSession.process(
-                            rawSamples: rawSamples,
-                            config: config,
-                            sampleRate: sampleRate
-                        )
-
-                        let decision = retry.evaluate(
-                            attempt: attempt,
-                            baseTemperature: config.temperature,
-                            totalSamples: result.samples.count,
-                            sampleRate: sampleRate,
-                            wordCount: wordCount
-                        )
-
-                        switch decision {
-                        case .accept:
-                            if !result.samples.isEmpty {
-                                continuation.yield(HollerAudioChunk(samples: result.samples, sampleRate: sampleRate))
+                        if attempt == 0 {
+                            // First attempt: stream chunks directly for low TTFA
+                            var totalSamples = 0
+                            let aborted = try await actor.generateStreamProcessed(
+                                text: text,
+                                voice: voice,
+                                config: config,
+                                temperature: temp
+                            ) { chunk in
+                                totalSamples += chunk.samples.count
+                                continuation.yield(chunk)
                             }
-                            continuation.finish()
-                            return
-                        case .retry:
-                            attempt += 1
-                            continue
-                        case .giveUp:
-                            if !result.samples.isEmpty {
-                                continuation.yield(HollerAudioChunk(samples: result.samples, sampleRate: sampleRate))
+
+                            if !aborted {
                                 continuation.finish()
-                            } else {
-                                continuation.finish(throwing: HollerError.allRetriesFailed(attempts: attempt + 1))
+                                return
                             }
-                            return
+
+                            // First attempt aborted — if we already yielded audio,
+                            // we can't un-yield it. Accept what we have or retry.
+                            if totalSamples > 0 {
+                                continuation.finish()
+                                return
+                            }
+                        } else {
+                            // Retry attempts: collect chunks, only yield if successful
+                            var collected: [HollerAudioChunk] = []
+                            _ = try await actor.generateStreamProcessed(
+                                text: text,
+                                voice: voice,
+                                config: config,
+                                temperature: temp
+                            ) { chunk in
+                                collected.append(chunk)
+                            }
+
+                            let totalSamples = collected.reduce(0) { $0 + $1.samples.count }
+
+                            let decision = retry.evaluate(
+                                attempt: attempt,
+                                baseTemperature: config.temperature,
+                                totalSamples: totalSamples,
+                                sampleRate: sampleRate,
+                                wordCount: wordCount
+                            )
+
+                            switch decision {
+                            case .accept:
+                                for chunk in collected { continuation.yield(chunk) }
+                                continuation.finish()
+                                return
+                            case .retry:
+                                attempt += 1
+                                continue
+                            case .giveUp:
+                                if !collected.isEmpty {
+                                    for chunk in collected { continuation.yield(chunk) }
+                                    continuation.finish()
+                                } else {
+                                    continuation.finish(throwing: HollerError.allRetriesFailed(attempts: attempt + 1))
+                                }
+                                return
+                            }
                         }
+
+                        attempt += 1
                     }
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
         }
+    }
+
+    /// Create a speech session for LLM integration.
+    /// Feed text tokens via `session.feed()`, consume audio via `session.audio`.
+    /// KV cache carries over between sentences automatically (Phase 2B).
+    public func makeSession(voice: String) -> SpeechSession {
+        SpeechSession(actor: actor, voice: voice, configuration: configuration)
+    }
+
+    /// Raw streaming test — bypasses silence pipeline, returns chunk-level data.
+    public func streamRaw(_ text: String, voice: String) async throws -> StreamingResult {
+        try await actor.generateStreaming(
+            text: text,
+            voice: voice,
+            config: configuration,
+            temperature: configuration.temperature
+        )
     }
 
     /// Synthesize complete audio (collects all streaming chunks).

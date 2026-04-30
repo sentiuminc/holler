@@ -21,5 +21,8 @@ public struct HollerConfiguration: Sendable {
     public var carryoverPauseMinMs: Int = 150
     public var carryoverPauseMaxMs: Int = 250
 
+    // Debug
+    public var debugPipeline: Bool = false
+
     public init() {}
 }

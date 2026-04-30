@@ -1,7 +1,7 @@
 # Holler Swift: Fast On-Device TTS Inference Library
 
-**Status:** Research complete, ready to prototype.  
-**Date:** 2026-04-29  
+**Status:** Phase 2A complete (streaming + session API). Phase 2B next (KV cache carryover).  
+**Date:** 2026-04-30  
 **Goal:** Pure Swift TTS inference library for Holler voices. Powers standalone Holler Mac app, and can replace ivi's Python TTS sidecar for in-process inference.
 
 ## Architecture
@@ -85,17 +85,20 @@ We'll figure this out by doing. First: make it work end-to-end in a Mac app. The
 
 ### Baseline (M1 Pro, Holler Kit 6-bit)
 
-| Metric | Python server (our optimized) | mlx-audio-swift (stock) | **Swift optimized** |
+| Metric | Python server (our optimized) | mlx-audio-swift (stock) | **HollerKit (Phase 2A)** |
 |---|---|---|---|
-| TTFA streaming | 128-144ms | 350ms | **143-146ms** |
-| RTF (12cb, streaming) | 0.45-0.50 (~2.0-2.2x RT) | 0.52 (1.9x RT) | **0.44-0.50 (~2.0x RT)** |
-| RTF (16cb, streaming) | N/A | 0.52 (1.9x RT) | **0.44-0.50 (~2.0x RT)** |
-| TTFB consistency | Variable (128-846ms) | 350ms+ | **Rock solid: 143-146ms** |
+| TTFA raw streaming | 128-144ms | 350ms | **125-140ms** |
+| TTFA with pipeline | N/A | N/A | **230-350ms** |
+| TTFA session (LLM) | N/A | N/A | **265ms** (20ms/tok sim) |
+| RTF (12cb, streaming) | 0.45-0.50 | 0.52 | **0.47-0.66** |
 | GPU memory | ~1.7GB | ~1.8GB | ~1.78GB |
-| Model load | ~1.5s | ~5s (more warmup) | ~2s (incl. warmup) |
-| First-run TTFA | N/A | 451ms (shader JIT) | **144ms (warmup eliminates JIT)** |
+| Model load | ~1.5s | ~5s | ~1.5s (incl. warmup) |
 
-**Swift matches Python on throughput and wins on consistency.** Both use the same C++ Metal backend. The old "Python is 2.6x realtime" number was from an earlier benchmark under different conditions; fresh side-by-side tests (2026-04-30) show both engines at ~2.0x realtime streaming. Swift's TTFB never spikes — Python occasionally hits 300-800ms on short sentences.
+**TTFA breakdown (with pipeline):** ~130ms model generation + 0-200ms onset detection (discarding codec warmup silence). The onset detector uses 2-of-3 RMS confirmation which adds 1-2 chunks of latency — optimization target for later.
+
+**TTFA breakdown (session):** token feeding delay (LLM-dependent) + generation + onset detection. At 200 tok/s: ~240ms. At 50 tok/s: ~270ms. Feeding is the smallest component.
+
+**RTF note:** Short sentences ("Hey!", "Got it.") have RTF 0.65+ because codec warmup is proportionally larger. Sentences >1s audio hit RTF ~0.47-0.53, matching Python.
 
 ### Optimizations Applied (2026-04-29)
 
@@ -186,35 +189,75 @@ Sources/MLXAudioTTS/Models/Qwen3TTS/Qwen3TTSSpeechTokenizer.swift
 
 ## Public API Design
 
+Three tiers: batch (complete audio), streaming (known text), and session (LLM integration).
+
 ```swift
 import HollerKit
 
-// Load model (~1.5-2s: weights + Metal compile + warmup)
-let model = try await HollerModel.load(from: "/path/to/holler-6bit")
-// or: let model = try await HollerModel.load(bundled: "holler-kit-dakota-6bit")
+// Load model (~2s: weights + Metal warmup)
+let model = try await HollerModel.load(repo: "sentium/holler-0.6b-6bit")
 
 model.voices        // ["kit", "dakota"]
 model.isLoaded      // true
 
-// Full synthesis (returns when complete)
-let audio = try model.synthesize("Hello world", voice: "kit")
-// audio.samples: [Float], audio.sampleRate: 24000
 
-// Streaming (target: 120ms to first chunk)
+// === Tier 1: Batch — complete text, complete audio ===
+
+let audio = try await model.synthesize("Hello world", voice: "kit")
+// audio.samples: [Float], audio.sampleRate: 24000, audio.duration: Double
+
+
+// === Tier 2: Streaming — complete text, chunked audio (~130ms TTFA) ===
+
 for try await chunk in model.stream("Hello world", voice: "kit") {
-    player.schedule(chunk.samples)
+    // chunk.samples: [Float], chunk.sampleRate: 24000
+    playerNode.scheduleBuffer(chunk.asAudioBuffer())
 }
 
-// Configuration
-model.temperature = 0.6        // default, matches training
-model.codebooks = 12           // skip 13-16 for speed
-model.streamingFirstChunk = 3  // codec tokens before first emit
-model.streamingChunkSize = 40  // codec tokens per subsequent chunk
 
-// Memory management
-model.unload()       // releases ~1.7GB GPU memory
-model.isLoaded       // false
+// === Tier 3: Session — streaming text in, streaming audio out ===
+// For LLM integration. Text arrives token-by-token, audio starts
+// as soon as the first sentence is complete. KV cache carries over
+// between sentences automatically for prosody continuity.
+
+let session = model.makeSession(voice: "kit")
+
+// Feed text and consume audio concurrently:
+async let playback: Void = {
+    for try await chunk in session.audio {
+        playerNode.scheduleBuffer(chunk.asAudioBuffer())
+    }
+}()
+
+// Feed tokens as they arrive from an LLM
+for await token in llmTokenStream {
+    await session.feed(token)  // buffers internally, synthesizes on sentence boundaries
+}
+await session.finish()  // flush remaining buffered text
+try await playback      // audio stream ends after all sentences synthesized
+
+// Cancellation (barge-in: user interrupts while ivi is speaking)
+session.cancel()  // stops generation, discards buffer, releases cache
+
+
+// === Configuration ===
+
+model.configuration.temperature = 0.6
+model.configuration.codebooks = 12
+model.configuration.maxRetries = 3
+
+// === Memory management ===
+
+await model.unload()  // releases ~1.7GB GPU memory
 ```
+
+### API Design Principles
+
+- **Library yields `[Float]` + sampleRate.** No AVFoundation dependency. Caller handles playback, file writing, or further processing. This keeps HollerKit focused on generation.
+- **Session handles carryover implicitly.** First sentence in a session generates with a fresh KV cache. Subsequent sentences carry over the cache for prosody continuity. The caller never sets a "continue" flag — the session just knows.
+- **Sentence buffering is internal.** LLM output arrives as arbitrary text chunks (half a word, 1.5 sentences, etc.). The session's `SentenceBuffer` accumulates text, detects sentence boundaries (`.!?` + space, abbreviation-aware), and dispatches complete sentences to the TTS model. `finish()` flushes whatever remains.
+- **Streaming is the primary generation path.** Both `stream()` and `synthesize()` use the same streaming engine internally. `synthesize()` is sugar that collects all chunks into one result. The silence pipeline works on chunks as they arrive (not on complete audio).
+- **Force-yield on long sentences.** If no sentence boundary is detected after ~15 words, the buffer yields anyway to prevent long first-sentence delays.
 
 ## Model Cache Setup (for testing)
 
@@ -252,13 +295,12 @@ swift build -c release --product mlx-audio-swift-tts --disable-sandbox
 
 ### Package Location & Dependency
 
-Lives at `holler/swift/HollerKit/`. Depends on our fork of mlx-audio-swift via local path dependency (`../../../mlx-audio-swift`). When we PR optimizations upstream to Blaizzy/mlx-audio-swift, switch to URL dependency.
+Lives at `holler/swift/HollerKit/`. Depends on sentiuminc/mlx-audio-swift fork via exact SPM tag. Upstream PRs deprioritized — fork works well, all changes go there.
 
 ```swift
 // Package.swift (key parts)
 dependencies: [
-    .package(path: "../../../mlx-audio-swift"),  // Our fork with optimizations
-    // Future: .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", from: "x.y.z"),
+    .package(url: "https://github.com/sentiuminc/mlx-audio-swift.git", exact: "0.31.3-holler.1"),
 ]
 ```
 
@@ -269,22 +311,24 @@ holler/swift/HollerKit/
 ├── Package.swift
 ├── Sources/
 │   ├── HollerKit/
-│   │   ├── HollerModel.swift          — Public API (actor): load, stream, synthesize, unload
+│   │   ├── HollerModel.swift          — Public API: load, stream, synthesize, makeSession, unload
+│   │   ├── SpeechSession.swift        — Session actor: feed/finish/cancel/audio (LLM integration)
+│   │   ├── SentenceBuffer.swift       — Streaming text → sentence boundary detection
 │   │   ├── HollerConfiguration.swift  — All tunables with Python-parity defaults
 │   │   ├── HollerAudioChunk.swift     — Chunk/Audio types yielded by stream
 │   │   ├── HollerError.swift          — Error types
 │   │   ├── SilenceAnalyzer.swift      — RMS speech detection, onset finding
 │   │   ├── AudioPostProcessor.swift   — Onset trim, 20ms fadeout, silence generation
 │   │   ├── RetryController.swift      — Escalating temperature retry (up to 3x)
-│   │   ├── InferenceActor.swift       — Actor serializing all MLX calls
-│   │   ├── GenerationSession.swift    — Single generation + 4-piece silence pipeline
-│   │   └── ContinuousSession.swift    — Multi-sentence KV cache carryover + pause injection
+│   │   ├── InferenceActor.swift       — Actor serializing all MLX calls (batch + streaming)
+│   │   └── GenerationSession.swift    — Chunk-by-chunk streaming silence pipeline
 │   └── HollerCLI/
 │       └── HollerCLIApp.swift         — `holler` CLI binary
 └── Tests/
     └── HollerKitTests/
         ├── SilenceAnalyzerTests.swift
-        └── AudioPostProcessorTests.swift
+        ├── AudioPostProcessorTests.swift
+        └── SentenceBufferTests.swift
 ```
 
 ### What Each File Ports from Python (server.py)
@@ -294,11 +338,12 @@ holler/swift/HollerKit/
 | `_has_speech()` L173-183 | `SilenceAnalyzer.hasSpeech()` | 2-of-3 RMS window confirmation |
 | `_find_speech_onset()` L186-204 | `SilenceAnalyzer.findSpeechOnset()` | 10ms windows, 150ms pre-roll |
 | `_apply_trailing_fadeout()` L207-214 | `AudioPostProcessor.applyFadeOut()` | 20ms linear fade-out |
-| `_run_generation()` L217-419 | `GenerationSession.run()` | 4-piece silence pipeline |
+| `_run_generation()` L217-419 | `GenerationSession` | Chunk-by-chunk streaming silence pipeline |
 | `generate_audio()` L424-484 | `RetryController` + `HollerModel.stream()` | 3x retry, escalating temp |
 | `_mlx_worker()` L76-146 | `InferenceActor` | Swift actor (not thread+queue) |
-| `_carry_over_state` L422 | `ContinuousSession` | KV cache persistence (Phase 2) |
-| Carryover pause 150-250ms L369-374 | `ContinuousSession` | Random pause injection (Phase 2) |
+| `_carry_over_state` L422 | `SpeechSession` (internal KV cache) | Implicit carryover via session lifecycle |
+| Carryover pause L369-374 | `SpeechSession` | 150-250ms pause injection between sentences |
+| N/A (HTTP chunked) | `SentenceBuffer` | Streaming text in from LLM, sentence boundary detection |
 
 ### 4-Piece Silence Pipeline (GenerationSession)
 
@@ -319,36 +364,52 @@ Swift uses an `actor` (`InferenceActor`). The actor guarantees serialized access
 
 ### Implementation Phases
 
-**Phase 1 — No mlx-audio-swift changes needed:**
+**Phase 1 — Batch generation + silence pipeline (DONE):**
 
-Everything below works from the existing public `generateStream` API on `Qwen3TTSModel`.
+Uses batch `generate()` API. Silence pipeline processes complete audio post-generation.
+TTFA = total generation time (~500ms-2s). Proved the full pipeline works end-to-end.
 
-1. Package.swift + types (Configuration, AudioChunk, Error)
-2. SilenceAnalyzer + AudioPostProcessor — pure `[Float]` functions, unit testable without model
-3. RetryController — decision logic, unit testable
-4. InferenceActor + HollerModel (load/unload/voices)
-5. GenerationSession — 4-piece silence pipeline wrapping `generateStream`
-6. Wire it all: `HollerModel.stream()` + `synthesize()`
-7. `holler` CLI binary
+1. ✅ Package.swift + types (Configuration, AudioChunk, Error)
+2. ✅ SilenceAnalyzer + AudioPostProcessor — pure `[Float]` functions, unit testable
+3. ✅ RetryController — decision logic, unit testable
+4. ✅ InferenceActor + HollerModel (load/unload/voices)
+5. ✅ GenerationSession — batch silence pipeline
+6. ✅ `HollerModel.stream()` + `synthesize()`
+7. ✅ `holler` CLI binary
 
-**Phase 2 — Needs mlx-audio-swift PR (TalkerCacheState):**
+**Phase 2A — Streaming generation (no fork changes needed):**
 
-KV cache carryover requires new public API on `Qwen3TTSModel`:
+Switch from batch `generate()` to streaming `generateStream()`. Proved safe with
+6 consecutive calls, zero crashes, ~130ms TTFA (2026-04-30). The Phase 1 segfault
+was `String(format: "%s")`, not MLX threading — streaming was never broken.
+
+8. SentenceBuffer — text accumulation, sentence boundary detection, flush
+9. GenerationSession rewrite — chunk-by-chunk streaming silence pipeline
+10. InferenceActor streaming path — wraps `generateStream()`, yields `[Float]` chunks
+11. HollerModel.stream() — yields real streaming chunks (~130ms TTFA)
+12. SpeechSession shell — `feed()/finish()/cancel()/audio` API, uses SentenceBuffer
+
+**Phase 2B — KV cache carryover (needs fork changes):**
+
+All changes to sentiuminc/mlx-audio-swift fork, tagged releases. No upstream PRs.
+
+Fork changes to `generateVoiceDesign()`:
+- Add `existingCache: [any KVCache]?` param — reuse instead of `talker.makeCache()`
+- Return cache after generation for caller to persist
+- Extended causal mask when `cache[0].offset > 0` (server.py L271-279)
+- Conditional `resetStreamingState()` — skip when carrying over
+- Conditional `Memory.clearCache()` — skip when carrying over
 
 ```swift
 public struct TalkerCacheState: @unchecked Sendable {
-    let cache: [any KVCache]
-    let offset: Int
+    public let cache: [any KVCache]
 }
-
-// New generateStream overload accepting carryOverCache
 ```
 
-The Python server's `first_call_mask` causal mask extension (server.py L271-279) must also be ported.
-
-8. PR `TalkerCacheState` + `carryOverCache` param to mlx-audio-swift
-9. ContinuousSession (KV cache persistence + 150-250ms pause injection)
-10. `HollerModel.streamContinuous()`
+HollerKit changes:
+13. Wire carryover into SpeechSession — hold TalkerCacheState between sentences
+14. Pause injection — 150-250ms silence between carried-over sentences
+15. Test carryover audio quality — A/B vs Python server
 
 ### `holler` CLI Design
 
@@ -375,42 +436,7 @@ Key difference from `mlx-audio-swift-tts`: the `holler` CLI produces production-
 
 ### HollerKit Public API
 
-```swift
-import HollerKit
-
-// Load model (~2s: weights + Metal warmup)
-let model = try await HollerModel.load(from: "/path/to/holler-6bit")
-// or: let model = try await HollerModel.load(repo: "sentium/holler-0.6b-6bit")
-
-model.voices        // ["kit", "dakota"]
-model.isLoaded      // true
-
-// Full synthesis (returns when complete)
-let audio = try await model.synthesize("Hello world", voice: "kit")
-// audio.samples: [Float], audio.sampleRate: 24000
-
-// Streaming (silence-trimmed, faded, retried)
-for try await chunk in model.stream("Hello world", voice: "kit") {
-    player.schedule(chunk.samples)
-}
-
-// Multi-sentence continuity (Phase 2 — KV cache carryover)
-for try await chunk in model.streamContinuous("First sentence.", voice: "kit") {
-    player.schedule(chunk.samples)
-}
-for try await chunk in model.streamContinuous("Second sentence.", voice: "kit") {
-    player.schedule(chunk.samples)  // prosody continues naturally
-}
-model.resetContinuousSession()
-
-// Configuration
-model.configuration.temperature = 0.6
-model.configuration.codebooks = 12
-model.configuration.maxRetries = 3
-
-// Memory management
-model.unload()       // releases ~1.7GB GPU memory
-```
+See "Public API Design" section above for the full three-tier API (batch, streaming, session).
 
 ### Configuration Defaults (matching Python server.py)
 
@@ -468,18 +494,44 @@ Would become something like:
 import HollerKit
 
 private var model: HollerModel?
+private var session: SpeechSession?
 
 func ensureModelLoaded() async {
     guard model == nil else { return }
-    model = try? await HollerModel.load(bundled: "holler-kit-dakota-6bit")
+    model = try? await HollerModel.load(repo: "sentium/holler-0.6b-6bit")
 }
 
-func generateAndPlay(_ text: String) async {
+// Called when ivi starts speaking a response
+func startSpeaking(voice: String) async {
     await ensureModelLoaded()
     guard let model else { return }
-    for try await chunk in model.stream(text, voice: "kit") {
-        TTSPlayer.shared.scheduleAudio(chunk.pcmData)
+    session = model.makeSession(voice: voice)
+
+    // Start consuming audio in background
+    Task {
+        guard let session else { return }
+        for try await chunk in session.audio {
+            TTSPlayer.shared.scheduleBuffer(chunk.samples, sampleRate: chunk.sampleRate)
+        }
     }
+}
+
+// Called as LLM tokens arrive
+func feedText(_ token: String) async {
+    await session?.feed(token)
+}
+
+// Called when LLM response is complete
+func finishSpeaking() async {
+    await session?.finish()
+    session = nil
+}
+
+// Called when user interrupts (barge-in)
+func cancelSpeaking() {
+    session?.cancel()
+    session = nil
+    TTSPlayer.shared.stop()
 }
 ```
 
