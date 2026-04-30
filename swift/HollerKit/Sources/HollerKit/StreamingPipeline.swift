@@ -11,17 +11,23 @@
 struct StreamingPipeline {
     private let config: HollerConfiguration
     private let sampleRate: Int
+    private let silentAbortChunks: Int
 
-    private var speechStarted = false
-    private var silentTokenCount = 0
+    private var speechStarted: Bool
+    private var needsPause: Bool
+    private var silentChunkCount = 0
     private var pendingSilence: [[Float]] = []
     private var heldChunk: [Float]?
     private(set) var aborted = false
     private(set) var totalSamplesYielded = 0
 
-    init(config: HollerConfiguration, sampleRate: Int = 24000) {
+    init(config: HollerConfiguration, sampleRate: Int = 24000, isCarryover: Bool = false) {
         self.config = config
         self.sampleRate = sampleRate
+        self.speechStarted = isCarryover
+        self.needsPause = isCarryover
+        // silentAbortTokens is in codec tokens; each chunk is streamingChunkTokens tokens
+        self.silentAbortChunks = max(1, config.silentAbortTokens / config.streamingChunkTokens)
     }
 
     /// Process an incoming audio chunk. Returns zero or more chunks to yield to the caller.
@@ -35,12 +41,13 @@ struct StreamingPipeline {
         }
     }
 
-    /// Call when the stream ends. Returns the final chunk with fadeout applied, or nil if aborted/empty.
+    /// Call when the stream ends. Returns the final chunk with fadeout applied, or nil if empty.
     mutating func finish() -> [Float]? {
-        guard !aborted, let held = heldChunk else { return nil }
+        guard let held = heldChunk else { return nil }
         heldChunk = nil
         let faded = AudioPostProcessor.applyFadeOut(held, fadeMs: config.fadeOutMs, sampleRate: sampleRate)
         totalSamplesYielded += faded.count
+        config.log?("[pipeline] finish: flushed held chunk (\(faded.count) samples, aborted=\(aborted))")
         return faded
     }
 
@@ -53,17 +60,19 @@ struct StreamingPipeline {
             preRollMs: config.speechOnsetPreRollMs,
             sampleRate: sampleRate
         ) else {
-            silentTokenCount += 1
-            if silentTokenCount >= config.silentAbortTokens {
+            silentChunkCount += 1
+            if silentChunkCount >= silentAbortChunks {
+                config.log?("[pipeline] pre-speech abort after \(silentChunkCount) silent chunks (~\(silentChunkCount * config.streamingChunkTokens) tokens)")
                 aborted = true
             }
             return []
         }
 
         speechStarted = true
-        silentTokenCount = 0
+        silentChunkCount = 0
         let trimmed = Array(samples[onset...])
         heldChunk = trimmed
+        config.log?("[pipeline] speech onset at sample \(onset), trimmed to \(trimmed.count) samples")
         return []
     }
 
@@ -73,6 +82,16 @@ struct StreamingPipeline {
         var output: [[Float]] = []
 
         if SilenceAnalyzer.hasSpeech(samples, threshold: config.speechOnsetThresholdRMS, sampleRate: sampleRate) {
+            if needsPause {
+                let pauseMs = Int.random(in: config.carryoverPauseMinMs...config.carryoverPauseMaxMs)
+                let pauseSamples = Int(Double(sampleRate) * Double(pauseMs) / 1000.0)
+                let naturalMs = pendingSilence.reduce(0) { $0 + $1.count } * 1000 / sampleRate
+                config.log?("[pipeline] carryover pause: \(pauseMs)ms (replaced \(naturalMs)ms natural)")
+                pendingSilence.removeAll()
+                pendingSilence.append([Float](repeating: 0, count: pauseSamples))
+                needsPause = false
+            }
+
             if let held = heldChunk {
                 output.append(held)
                 totalSamplesYielded += held.count
@@ -82,12 +101,13 @@ struct StreamingPipeline {
                 totalSamplesYielded += pending.count
             }
             pendingSilence.removeAll()
-            silentTokenCount = 0
+            silentChunkCount = 0
             heldChunk = samples
         } else {
             pendingSilence.append(samples)
-            silentTokenCount += 1
-            if silentTokenCount >= config.silentAbortTokens {
+            silentChunkCount += 1
+            if silentChunkCount >= silentAbortChunks {
+                config.log?("[pipeline] post-speech abort after \(silentChunkCount) silent chunks (~\(silentChunkCount * config.streamingChunkTokens) tokens, \(totalSamplesYielded) samples yielded)")
                 pendingSilence.removeAll()
                 aborted = true
             }

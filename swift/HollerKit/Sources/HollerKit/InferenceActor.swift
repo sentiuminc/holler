@@ -115,12 +115,14 @@ actor InferenceActor {
         )
     }
 
-    /// Stream generation with silence pipeline, yielding processed chunks via continuation.
+    /// Stream generation with silence pipeline and KV cache carryover.
     func generateStreamProcessed(
         text: String,
         voice: String,
         config: HollerConfiguration,
         temperature: Float,
+        cacheState: Qwen3TTSModel.TalkerCacheState?,
+        resetDecoder: Bool,
         yield yieldChunk: (HollerAudioChunk) -> Void
     ) async throws -> Bool {
         guard let model else {
@@ -133,7 +135,8 @@ actor InferenceActor {
             topK: config.topK
         )
 
-        var pipeline = StreamingPipeline(config: config, sampleRate: sampleRate)
+        var pipeline = StreamingPipeline(config: config, sampleRate: sampleRate, isCarryover: !resetDecoder)
+        let log = config.log
 
         let stream = model.generateStream(
             text: text,
@@ -143,11 +146,18 @@ actor InferenceActor {
             language: "english",
             generationParameters: params,
             streamingInterval: Double(config.streamingChunkTokens),
-            codebooks: config.codebooks
+            codebooks: config.codebooks,
+            cacheState: cacheState,
+            resetDecoder: resetDecoder
         )
 
-        let debug = config.debugPipeline
-        let genStart = debug ? Date() : Date.distantPast
+        let offset = cacheState?.cache?.first?.offset ?? 0
+        if offset > 0 {
+            log?("[generate] KV cache carry-over: \(offset) tokens, resetDecoder=\(resetDecoder)")
+        } else {
+            log?("[generate] fresh generation, resetDecoder=\(resetDecoder)")
+        }
+        let genStart = Date()
         var rawChunkIndex = 0
         var firstYieldLogged = false
 
@@ -155,18 +165,18 @@ actor InferenceActor {
             if case .audio(let arr) = event {
                 let samples = arr.asArray(Float.self)
                 rawChunkIndex += 1
-                if debug {
+                if log != nil {
                     let elapsed = Date().timeIntervalSince(genStart) * 1000
                     let rms = Self.rms(samples)
-                    print("[pipeline] raw chunk \(rawChunkIndex): \(String(format: "%.0f", elapsed))ms, "
+                    log?("[generate] raw chunk \(rawChunkIndex): \(String(format: "%.0f", elapsed))ms, "
                         + "\(samples.count) samples, rms=\(String(format: "%.4f", rms))")
                 }
 
                 let processed = pipeline.processChunk(samples)
                 for chunk in processed {
-                    if debug, !firstYieldLogged {
+                    if !firstYieldLogged {
                         let yieldElapsed = Date().timeIntervalSince(genStart) * 1000
-                        print("[pipeline] FIRST YIELD at \(String(format: "%.0f", yieldElapsed))ms "
+                        log?("[generate] FIRST YIELD at \(String(format: "%.0f", yieldElapsed))ms "
                             + "(after \(rawChunkIndex) raw chunks)")
                         firstYieldLogged = true
                     }
@@ -177,20 +187,18 @@ actor InferenceActor {
         }
 
         if let final = pipeline.finish() {
-            if debug, !firstYieldLogged {
+            if !firstYieldLogged {
                 let yieldElapsed = Date().timeIntervalSince(genStart) * 1000
-                print("[pipeline] FIRST YIELD at \(String(format: "%.0f", yieldElapsed))ms "
+                log?("[generate] FIRST YIELD at \(String(format: "%.0f", yieldElapsed))ms "
                     + "(final chunk, after \(rawChunkIndex) raw chunks)")
             }
             yieldChunk(HollerAudioChunk(samples: final, sampleRate: sampleRate))
         }
 
-        if debug {
-            let totalElapsed = Date().timeIntervalSince(genStart) * 1000
-            print("[pipeline] done: \(rawChunkIndex) raw chunks, "
-                + "\(String(format: "%.0f", totalElapsed))ms total, "
-                + "aborted=\(pipeline.aborted)")
-        }
+        let totalElapsed = Date().timeIntervalSince(genStart) * 1000
+        log?("[generate] done: \(rawChunkIndex) raw chunks, "
+            + "\(String(format: "%.0f", totalElapsed))ms total, "
+            + "aborted=\(pipeline.aborted)")
 
         return pipeline.aborted
     }

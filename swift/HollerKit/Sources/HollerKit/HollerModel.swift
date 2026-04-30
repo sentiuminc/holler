@@ -47,7 +47,7 @@ public final class HollerModel: @unchecked Sendable {
         let wordCount = text.split(separator: " ").count
 
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     let voices = await actor.voices
                     if !voices.isEmpty, !voices.contains(voice) {
@@ -70,7 +70,9 @@ public final class HollerModel: @unchecked Sendable {
                                 text: text,
                                 voice: voice,
                                 config: config,
-                                temperature: temp
+                                temperature: temp,
+                                cacheState: nil,
+                                resetDecoder: true
                             ) { chunk in
                                 totalSamples += chunk.samples.count
                                 continuation.yield(chunk)
@@ -94,7 +96,9 @@ public final class HollerModel: @unchecked Sendable {
                                 text: text,
                                 voice: voice,
                                 config: config,
-                                temperature: temp
+                                temperature: temp,
+                                cacheState: nil,
+                                resetDecoder: true
                             ) { chunk in
                                 collected.append(chunk)
                             }
@@ -134,6 +138,7 @@ public final class HollerModel: @unchecked Sendable {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

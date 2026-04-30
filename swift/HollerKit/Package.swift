@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "holler", targets: ["HollerCLI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/sentiuminc/mlx-audio-swift.git", exact: "0.31.3-holler.1"),
+        .package(path: "../../../mlx-audio-swift"),
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.6")),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
     ],

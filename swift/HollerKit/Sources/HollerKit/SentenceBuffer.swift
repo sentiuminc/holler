@@ -11,7 +11,7 @@ public struct SentenceBuffer: Sendable {
         "ave", "blvd", "dept", "est", "fig", "inc", "ltd",
     ]
 
-    public init(forceYieldWordCount: Int = 15) {
+    public init(forceYieldWordCount: Int = 30) {
         self.forceYieldWordCount = forceYieldWordCount
     }
 
@@ -44,12 +44,23 @@ public struct SentenceBuffer: Sendable {
                 buffer = String(buffer[endIndex...])
                 wordCount = buffer.split(separator: " ").count
             } else if wordCount >= forceYieldWordCount {
-                let forced = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !forced.isEmpty {
-                    sentences.append(forced)
+                if let clauseIdx = findLastClauseBoundary() {
+                    let endIndex = buffer.index(after: clauseIdx)
+                    let clause = String(buffer[buffer.startIndex..<endIndex])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !clause.isEmpty {
+                        sentences.append(clause)
+                    }
+                    buffer = String(buffer[endIndex...])
+                    wordCount = buffer.split(separator: " ").count
+                } else {
+                    let forced = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !forced.isEmpty {
+                        sentences.append(forced)
+                    }
+                    buffer = ""
+                    wordCount = 0
                 }
-                buffer = ""
-                wordCount = 0
                 break
             } else {
                 break
@@ -109,6 +120,32 @@ public struct SentenceBuffer: Sendable {
         guard start < end else { return false }
         let word = String(buffer[start..<end]).lowercased()
         return Self.abbreviations.contains(word)
+    }
+
+    private func findLastClauseBoundary() -> String.Index? {
+        let clauseChars: Set<Character> = [",", ";", ":", "\u{2014}"]
+        var lastBoundary: String.Index? = nil
+        var wordsBeforeBoundary = 0
+        var currentWords = 0
+
+        var i = buffer.startIndex
+        while i < buffer.endIndex {
+            let ch = buffer[i]
+            if ch == " " { currentWords += 1 }
+            if clauseChars.contains(ch) {
+                let afterPunct = buffer.index(after: i)
+                if afterPunct < buffer.endIndex && (buffer[afterPunct].isWhitespace || buffer[afterPunct].isNewline) {
+                    if currentWords >= 5 {
+                        lastBoundary = i
+                        wordsBeforeBoundary = currentWords
+                    }
+                }
+            }
+            i = buffer.index(after: i)
+        }
+
+        guard let boundary = lastBoundary, wordsBeforeBoundary >= 5 else { return nil }
+        return boundary
     }
 
     private func isDecimalNumber(at dotIndex: String.Index) -> Bool {

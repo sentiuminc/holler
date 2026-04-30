@@ -21,8 +21,9 @@ public struct HollerConfiguration: Sendable {
     public var carryoverPauseMinMs: Int = 150
     public var carryoverPauseMaxMs: Int = 250
 
-    // Debug
-    public var debugPipeline: Bool = false
+    // Debug logging — set to a closure to enable verbose output.
+    // Library never calls print() directly; all debug output goes through this.
+    public var log: (@Sendable (String) -> Void)? = nil
 
     public init() {}
 }
