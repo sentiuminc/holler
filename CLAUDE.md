@@ -277,10 +277,23 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 3. ~~**Enhance training audio**~~ — ✅ Pipeline proven.
 4. ~~**GPU training data generation**~~ — ✅ DONE. Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF (~25 min/voice). Scripts ready.
 5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Needs Tinder curation pass.
-6. **Add male auto-curate thresholds** — current thresholds reject 100% of male clips. Proposed: HNR > 8, harshness < 5%, peak > -2.
-7. **Tinder curation** — Kit (500 clips) and Dakota (400 clips) need manual listening pass.
-8. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
-9. **Full 10-voice train** — once all voices curated, single multi-voice training run.
-10. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
-11. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
-12. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.
+### HollerKit (Swift)
+
+6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification (old generation task may still be touching decoder).
+7. **Move Package.swift to repo root** — SPM requires it at root for `gh repo` consumption. Move `swift/HollerKit/Sources/` → `Sources/`, adjust paths. Python/training/voices coexist fine.
+8. **Push holler to sentiuminc/holler** — create public repo, `git remote add origin`, push. Repo is ready (39 commits, .gitignore covers checkpoints/audio/builds).
+9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
+10. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early ~20% on short sentences with heavy carryover. Model-level behavior. Note: also affects mid-paragraph sentences. No fix identified yet (EOS penalty or min generation length might help but risk other issues).
+
+### Voices & Training
+
+11. **Add male auto-curate thresholds** — current thresholds reject 100% of male clips. Proposed: HNR > 8, harshness < 5%, peak > -2.
+12. **Tinder curation** — Kit (500 clips) and Dakota (400 clips) need manual listening pass.
+13. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
+14. **Full 10-voice train** — once all voices curated, single multi-voice training run.
+15. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
+
+### Release
+
+16. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
+17. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.
