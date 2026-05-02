@@ -9,9 +9,9 @@ let package = Package(
         .executable(name: "holler", targets: ["HollerCLI"]),
     ],
     dependencies: [
-        .package(path: "../../../mlx-audio-swift"),
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.6")),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3")),
+        .package(url: "https://github.com/sentiuminc/mlx-audio-swift.git", from: "0.31.3-holler.2"),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.6"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", from: "3.31.3"),
     ],
     targets: [
         .target(
@@ -21,18 +21,15 @@ let package = Package(
                 .product(name: "MLXAudioCore", package: "mlx-audio-swift"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-            ],
-            path: "Sources/HollerKit"
+            ]
         ),
         .executableTarget(
             name: "HollerCLI",
-            dependencies: ["HollerKit"],
-            path: "Sources/HollerCLI"
+            dependencies: ["HollerKit"]
         ),
         .testTarget(
             name: "HollerKitTests",
-            dependencies: ["HollerKit"],
-            path: "Tests/HollerKitTests"
+            dependencies: ["HollerKit"]
         ),
     ]
 )

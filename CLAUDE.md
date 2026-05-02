@@ -27,7 +27,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Training data generated on GPU:** Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF. Scripts at `training/remote_generate_training_data.py` + `training/corpus.json`. **Do NOT use `faster-qwen3-tts` for voice cloning** — it breaks voice identity.
 - **Quantization:** 6-bit affine g64 is the pick.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
-- **Inference runtime (Swift):** HollerKit library at `swift/HollerKit/`. Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
+- **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
 - **Auto-curate thresholds need male adjustment:** Current thresholds reject 100% of male voice clips. HNR < 14 and harshness > 2% are female-calibrated. Proposed male: HNR > 8, harshness < 5%, peak > -2.
 - **Training data tools:** Full pipeline automated — `tools/regenerate_rejects.py`, `tools/enhance_clips.py`, `tools/trim_and_merge.py`, `tools/curate_clips.py`.
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
@@ -82,10 +82,10 @@ holler/
 │   ├── benchmark-katie-v6-{bf16,4bit}/ — older benchmark clips
 │   ├── v6-mlx/, v6-pytorch/, v5/   — earlier samples
 │   └── v7-{mlx,pytorch}-{katie,joe}/ — multi-voice samples
-├── swift/HollerKit/       — Swift package: HollerKit library + CLI
-│   ├── Package.swift              — SPM manifest (local dep on mlx-audio-swift)
-│   ├── Sources/HollerKit/         — Library: HollerModel, SpeechSession, StreamingPipeline
-│   └── Sources/HollerCLI/         — CLI: holler --text/--session/--benchmark/--talk
+├── Package.swift          — SPM manifest (HollerKit library + holler CLI)
+├── Sources/HollerKit/     — Swift library: HollerModel, SpeechSession, StreamingPipeline
+├── Sources/HollerCLI/     — Swift CLI: holler --text/--session/--benchmark/--talk
+├── Tests/HollerKitTests/  — Unit tests (SentenceBuffer, SilenceAnalyzer, AudioPostProcessor)
 ├── logs/                  — DEPRECATED: session logs now live in ivi repo at ivi/logs/
 │   ├── sessions/          — Old session logs (moved to ivi/logs/)
 │   └── runs/              — Raw training/inference logs
@@ -171,7 +171,7 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 
 ## HollerKit (Swift Package) — Phase 2B Complete
 
-Native Swift TTS library at `swift/HollerKit/`. Depends on `mlx-audio-swift` (local path `../../../mlx-audio-swift` during dev — switch to version pin when carryover API is tagged upstream).
+Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiuminc/mlx-audio-swift` (git URL, tag `0.31.3-holler.2`).
 
 **Architecture:**
 ```
@@ -280,8 +280,8 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 ### HollerKit (Swift)
 
 6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification in Swift (old generation task may still be touching decoder). **Same bug confirmed in Python server** — fix both in parallel.
-7. **Move Package.swift to repo root** — SPM requires it at root for `gh repo` consumption. Move `swift/HollerKit/Sources/` → `Sources/`, adjust paths. Python/training/voices coexist fine.
-8. **Push holler to sentiuminc/holler** — create public repo, `git remote add origin`, push. Repo is ready (39 commits, .gitignore covers checkpoints/audio/builds).
+7. ~~**Move Package.swift to repo root**~~ — ✅ DONE. SPM-consumable at root.
+8. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE. Public repo created.
 9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
 10. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early ~20% on short sentences with heavy carryover. Model-level behavior. Note: also affects mid-paragraph sentences. No fix identified yet (EOS penalty or min generation length might help but risk other issues).
 
