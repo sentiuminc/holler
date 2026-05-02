@@ -73,19 +73,19 @@ The package includes a command-line tool for testing:
 ./build.sh
 
 # Speak text through your speakers
-./holler --text "Hello world" --talk
+./holler --text 'Hello world' --talk
 
 # Save to file
-./holler --text "Hello world" --output hello.wav
+./holler --text 'Hello world' --output hello.wav
 
 # Simulate LLM streaming (token-by-token with sentence buffering)
-./holler --session --text "Sure. Let me check that for you. I think the answer is forty two."
+./holler --session --text 'Sure. Let me check that for you. I think the answer is forty two.'
 
 # Benchmark
 ./holler --benchmark
 
 # Debug mode — see the full pipeline (sentence splits, chunk RMS, cache state, retries)
-./holler --session --debug --text "Your text here"
+./holler --session --debug --text 'Your text here'
 ```
 
 > `build.sh` uses xcodebuild under the hood because MLX requires compiled Metal shaders (`.metallib`) which only Xcode can produce. `swift build` compiles the Swift code but skips Metal.
