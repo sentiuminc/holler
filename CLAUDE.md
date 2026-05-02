@@ -285,7 +285,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 7. ~~**Move Package.swift to repo root**~~ — ✅ DONE. SPM-consumable at root.
 8. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE. Public repo created.
 9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
-10. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early ~20% on short sentences with heavy carryover. Model-level behavior. Note: also affects mid-paragraph sentences. No fix identified yet (EOS penalty or min generation length might help but risk other issues).
+10. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early, cutting final phoneme ("wate" not "water"). Rare in practice (~5-10%, hard to reproduce on demand). Investigated 2026-05-02: negative logit bias on EOS token (−3) was implemented but couldn't validate because (a) the codec decoder produces smooth audio even on early EOS (no waveform discontinuity to detect), (b) the server's 20ms fade-out further masks any signal, (c) amplitude-based detection (tail RMS, peak) doesn't separate cuts from natural endings. The only reliable detector would be STT round-trip (generate → transcribe → compare last word to input). Needs more thorough investigation with a method that can actually reproduce the problem reliably before applying a fix.
 
 ### Voices & Training
 
