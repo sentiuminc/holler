@@ -44,6 +44,7 @@ FIRST_CHUNK_TOKENS = 3
 STREAM_CHUNK_TOKENS = 3
 SILENT_ABORT_TOKENS = 16
 DEFAULT_CODEBOOKS = 12
+SPEECH_THRESHOLD_RMS = 0.01
 CARRYOVER_PAUSE_MIN_MS = 150
 CARRYOVER_PAUSE_MAX_MS = 250
 SERVE_UI = True
@@ -172,27 +173,19 @@ def load_model():
 
 def _has_speech(chunk):
     """Check if a chunk contains speech using 2-of-3 temporal RMS confirmation."""
-    window = int(SAMPLE_RATE * 0.01)
-    threshold = 0.007
-    recent = [False, False, False]
-    for i, j in enumerate(range(0, len(chunk) - window, window)):
-        rms = float(np.sqrt(np.mean(chunk[j:j + window] ** 2)))
-        recent[i % 3] = rms >= threshold
-        if sum(recent) >= 2:
-            return True
-    return False
+    return _find_speech_onset(chunk) != -1
 
 
 def _find_speech_onset(chunk):
     """Find speech onset sample index with 150ms pre-roll.
 
     Scans 10ms windows. Speech confirmed when 2 of 3 consecutive windows
-    exceed RMS 0.007 — rejects ghost spikes, catches real speech.
+    exceed RMS threshold — rejects ghost spikes and rumble, catches real speech.
     Returns sample index or -1 if no speech found.
     """
     window = int(SAMPLE_RATE * 0.01)
     pre_roll = int(SAMPLE_RATE * 0.15)
-    threshold = 0.007
+    threshold = SPEECH_THRESHOLD_RMS
     recent = [False, False, False]
 
     for i, j in enumerate(range(0, len(chunk) - window, window)):
@@ -449,12 +442,6 @@ def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
         (True, {}, retry_temps[3]),
     ]
 
-    # TODO(FIXME): short audio retry may not be needed. The model sometimes
-    # produces 0.4s of audio for a 10-word sentence — _has_speech passes it
-    # (2-of-3 RMS windows > 0.007) but it sounds like silence. Root cause
-    # unclear: either the threshold is too low or the model outputs a brief
-    # artifact. Capture a short WAV in the wild to diagnose. This retry is a
-    # safety net — if the upstream detection is fixed, remove it.
     word_count = len(text.split())
     min_audio_samples = int(word_count * 0.08 * SAMPLE_RATE)
 
@@ -463,6 +450,11 @@ def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
             reason = "no speech" if total_samples == 0 else f"too short ({total_samples/SAMPLE_RATE:.1f}s for {word_count}w)"
             print(f"[holler] Abort ({reason}), retry {attempt}/3 temp={temp} | {text}", flush=True)
             mdl.speech_tokenizer.decoder.reset_streaming_state()
+            # Attempt 0 wrote its (poisoned) cache into _carry_over_state via
+            # cache_out. Retries use throwaway cout={}, so the stale cache
+            # would persist and corrupt the next carryover sentence. Clear it.
+            if not reset_decoder:
+                _carry_over_state = {}
 
         got_speech = False
         total_samples = 0

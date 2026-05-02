@@ -8,7 +8,7 @@ public enum SilenceAnalyzer {
     /// Port of server.py `_has_speech()` L173-183.
     public static func hasSpeech(
         _ samples: [Float],
-        threshold: Float = 0.007,
+        threshold: Float = 0.01,
         sampleRate: Int = defaultSampleRate
     ) -> Bool {
         let windowSize = Int(Double(sampleRate) * 0.01) // 10ms
@@ -36,7 +36,7 @@ public enum SilenceAnalyzer {
     /// Port of server.py `_find_speech_onset()` L186-204.
     public static func findSpeechOnset(
         _ samples: [Float],
-        threshold: Float = 0.007,
+        threshold: Float = 0.01,
         preRollMs: Float = 150,
         sampleRate: Int = defaultSampleRate
     ) -> Int? {

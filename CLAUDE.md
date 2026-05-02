@@ -207,10 +207,10 @@ session.feed(token)  →  SentenceBuffer  →  per-sentence generation  →  ses
 
 **Performance (release build, M1 Pro):** TTFA ~360ms (includes silence trim), RTF ~0.49.
 
-**Known issues (2026-04-30):**
-1. **Decoder stuttering on carryover** — "kkk" pattern. Root cause: decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix identified (~15 lines) but needs concurrency verification.
+**Known issues (2026-05-02):**
+1. **Carryover artifacts** — garbled vowels/stuttering ("aauuhha" or "kkk") and rumble on deep carryover. Two causes found: (a) retry cache poisoning — failed attempt's talker cache persisted in `_carry_over_state` while decoder got reset by retry, fixed in Python server.py (Swift already had fix). (b) KV cache degradation beyond ~150 tokens — model wasn't trained on long sequences, quality drops after 4-5 carryover sentences. No fix yet; may need cache size cap or trimming. Speech detection threshold raised 0.007→0.01 to catch rumble via existing silence abort.
 2. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early ~20% of the time on short sentences with heavy carryover. Model-level, not pipeline-fixable.
-3. **Long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Detectable by audio characteristics, could be caught and retried.
+3. **Long rumble artifact** — partially mitigated by threshold bump (0.007→0.01) and retry cache fix. Remaining cases are from KV cache degradation on deep carryover (see #1b).
 
 ## Known: 220ms Leading Silence
 
@@ -281,7 +281,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Dakota manually curated ✅.
 ### HollerKit (Swift)
 
-6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification in Swift (old generation task may still be touching decoder). **Same bug confirmed in Python server** — fix both in parallel.
+6. ~~**Fix decoder stuttering on carryover**~~ — Partially fixed. Root cause: retry cache poisoning (failed attempt's talker cache persisted, desync with decoder from successful retry). Python fix applied in server.py; Swift already had fix. Speech threshold raised 0.007→0.01 to catch rumble. Remaining issue: KV cache degradation on deep carryover (5+ sentences, ~150+ tokens) — needs cache cap or trim.
 7. ~~**Move Package.swift to repo root**~~ — ✅ DONE. SPM-consumable at root.
 8. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE. Public repo created.
 9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
