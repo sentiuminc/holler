@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""Enhancement pipeline for VoiceDesign output.
+"""[SUPERSEDED — use enhance_clean.py, which fixes the LUFS bug described below]
 
-Separate from enhance_clips.py (which is for training data from the 1.7B cloner).
-VoiceDesign output is already synthetic and clean — it doesn't need DeepFilter
-denoising or STFT-based spectral processing, both of which introduce chirping
-artifacts on already-clean TTS audio.
+Enhancement pipeline for VoiceDesign candidate output. Not for training data —
+for training data use enhance_clean.py.
 
-Pipeline: Trim → LUFS normalize → IIR notch at 5.5kHz
+This script has a LUFS normalization bug: it uses plain RMS + a hardcoded +3dB
+offset as a shortcut for LUFS, which lands ~2-3dB hot depending on content
+(measured: -19.4 LUFS actual vs -22.0 target on Nora). The +3 approximation is
+too rough — proper LUFS requires K-weighting filters (ITU-R BS.1770) before
+measuring RMS. enhance_clean.py fixes this.
 
-The IIR notch replaces the STFT de-esser. It cuts the center of the sibilance
-band (where S/T/Ch sounds live) without any spectral processing, so zero
-chirping/musical noise artifacts.
+What this script does correctly:
+- Trim: scans in 10ms RMS windows (threshold 0.001), finds first/last speech
+  frame, pads 100ms each side, applies 20ms linear fade-out at the tail.
+- IIR notch: single biquad filter at 5500Hz (Q=3.0) to tame sibilance. No STFT,
+  no spectral reconstruction, no chirping artifacts. Narrow enough to only cut
+  the sibilance center without affecting voice clarity.
+
+Kept for VoiceDesign candidate A/B listening (where loudness accuracy is less
+critical than for training data).
+
+Pipeline: Trim → LUFS normalize (approximate, ~2-3dB hot) → IIR notch at 5.5kHz
 
 Usage:
   python enhance_voicedesign.py --input ~/Downloads/voice-batches/batch_1 --output ~/Downloads/voice-batches/batch_1/enhanced

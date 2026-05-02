@@ -1,7 +1,34 @@
 #!/usr/bin/env python3
-"""Full training data enhancement pipeline.
+"""[DEPRECATED — use enhance_clean.py for all training data]
 
-DeepFilterNet3 → LUFS normalize → Spectral de-ess → Dynamic presence.
+This pipeline was originally built for Cartesia cloning output, which had
+significant noise from lower-quality VoiceDesign inputs fed into a noisier
+cloner. It is NOT appropriate for current 1.7B cloner output or VoiceDesign
+candidates — tested and measured on 2026-05-02 against enhance_clean.py on
+Kit, Dakota, Nora, and Joe samples.
+
+May be relevant again when cloning real (mic-recorded) voices, where DeepFilter
+and the STFT de-esser would have actual noise and sibilance to work with.
+
+Why each stage is wrong for synthetic audio:
+- DeepFilterNet3: denoises noise that doesn't exist. Adds seconds per clip,
+  runs a neural network on already-clean audio, and can introduce its own
+  subtle artifacts. Zero benefit measured on cloner output.
+- STFT de-esser: complex spectral processing that actually leaves MORE sibilance
+  than a simple IIR notch (measured: 0.0052 vs 0.0036 sibilance 4-10kHz on Nora).
+  Musical noise / chirping artifacts on clean synthetic audio.
+- Dynamic presence: boosts 3.5-8kHz on audio that is already spectrally balanced.
+  Counterproductive — adds harshness back in after the de-esser removed it.
+- LUFS: K-weighted and correct (this part is fine — copied into enhance_clean.py).
+
+Use enhance_clean.py instead: trim → K-weighted LUFS → IIR notch. Runs in
+seconds (no model load), less harsh, same or better DNSMOS, proper loudness.
+
+Kept for reference and for genuine real-world recorded audio use cases.
+
+---
+
+Original pipeline: DeepFilterNet3 → LUFS normalize → Spectral de-ess → Dynamic presence.
 
 Reads from audio-original/, writes to audio/. Idempotent — always processes from originals.
 
