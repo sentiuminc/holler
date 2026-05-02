@@ -111,6 +111,10 @@ struct HollerCLI {
             ? NSTemporaryDirectory() + "holler-\(ProcessInfo.processInfo.processIdentifier).wav"
             : output
 
+        if talk {
+            fputs("[holler] Note: --talk plays audio after generation finishes, not in real time.\n", stderr)
+        }
+
         if benchmark {
             try await runBenchmark(model: hollerModel, voice: voice)
         } else if session {

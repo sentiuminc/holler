@@ -169,7 +169,15 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 
 ## HollerKit (Swift Package) — Phase 2B Complete
 
-Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiuminc/mlx-audio-swift` (git URL, tag `0.31.3-holler.2`).
+Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiuminc/mlx-audio-swift` (git URL, tag `0.31.3-holler.3`).
+
+**Build & Run:**
+```bash
+./build.sh              # xcodebuild + copies binary to repo root (~3 min first, seconds after)
+./build.sh --clean      # nuke .build/.swiftpm first (use when xcodebuild gets confused)
+./holler --text 'Hello world' --talk
+```
+**⚠️ `swift build` compiles but the binary WILL NOT RUN** — mlx-swift's Metal shaders are only compiled by xcodebuild, not SPM. Always use `./build.sh`. This is an mlx-swift architectural limitation (TN3133).
 
 **Architecture:**
 ```
