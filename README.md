@@ -20,7 +20,7 @@ Add HollerKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/sentium/holler.git", from: "1.0.0"),
+    .package(url: "https://github.com/sentiuminc/holler.git", from: "1.0.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [
@@ -66,26 +66,30 @@ await session.finish()
 
 ### CLI
 
-The package includes a command-line tool for testing:
+The package includes a command-line tool for testing. Build once, then run directly:
 
 ```bash
-cd swift/HollerKit
+# Build (one time — takes ~3 min, compiling MLX + audio dependencies)
+xcodebuild -scheme holler -configuration Release -destination 'platform=macOS' -derivedDataPath .build/xcode -quiet
+alias holler=.build/xcode/Build/Products/Release/holler
 
 # Speak text through your speakers
-swift run holler --text "Hello world" --talk
+holler --text "Hello world" --talk
 
 # Save to file
-swift run holler --text "Hello world" --output hello.wav
+holler --text "Hello world" --output hello.wav
 
 # Simulate LLM streaming (token-by-token with sentence buffering)
-swift run holler --session --text "Sure. Let me check that for you. I think the answer is forty two."
+holler --session --text "Sure. Let me check that for you. I think the answer is forty two."
 
 # Benchmark
-swift run holler --benchmark
+holler --benchmark
 
 # Debug mode — see the full pipeline (sentence splits, chunk RMS, cache state, retries)
-swift run holler --session --debug --text "Your text here"
+holler --session --debug --text "Your text here"
 ```
+
+> **Why xcodebuild?** MLX requires compiled Metal shaders (`.metallib`) which only Xcode can build. `swift build` compiles the Swift code but skips Metal, so the binary crashes at runtime.
 
 ### Configuration
 
@@ -117,7 +121,7 @@ HTTP API with streaming audio. Good for prototyping and non-Swift integrations.
 ### Quick Start
 
 ```bash
-git clone https://github.com/sentium/holler.git
+git clone https://github.com/sentiuminc/holler.git
 cd holler
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -202,7 +206,7 @@ Scripts: `training/` for fine-tuning, `tools/` for data generation and curation.
 ## Requirements
 
 - macOS with Apple Silicon (M1 or later)
-- For Swift: Xcode 16+ / Swift 6.2+
+- For Swift: [Xcode 16+](https://developer.apple.com/xcode/) (full app, not just Command Line Tools — MLX requires Metal shader compilation which only Xcode provides)
 - For Python: Python 3.13+
 - ~2GB free RAM for inference
 
