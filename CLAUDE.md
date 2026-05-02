@@ -55,13 +55,13 @@ holler/
 ├── voices/                — Per-voice reference audio + training data
 │   ├── kit/               — Androgynous voice "Prism" (VoiceDesign, slot 3000) ← CONFIRMED
 │   │   ├── ref.wav        — kit08_prism_clear
-│   │   └── training-data/ — 500 clips generated on GPU (vanilla qwen-tts)
+│   │   └── training-data/ — 500 clips, 414 manually curated ✅
 │   │       ├── audio/           — 500 enhanced clips
 │   │       ├── audio-original/  — 500 raw clips from 3090
 │   │       └── train.jsonl
 │   ├── dakota/            — Male voice "Trail Guide" (VoiceDesign, slot 3001) ← CONFIRMED
 │   │   ├── ref.wav        — dakota03_trail_guide
-│   │   └── training-data/ — 400 clips (clips 101-500, first 100 were bad faster-qwen3-tts)
+│   │   └── training-data/ — 500 clips, 374 manually curated ✅
 │   │       ├── audio/           — 400 enhanced clips
 │   │       ├── audio-original/  — 400 raw clips from 3090
 │   │       └── train.jsonl
@@ -276,7 +276,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 2. ~~**Try alternative quantization**~~ — ✅ DONE. 6-bit affine g64 wins.
 3. ~~**Enhance training audio**~~ — ✅ Pipeline proven.
 4. ~~**GPU training data generation**~~ — ✅ DONE. Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF (~25 min/voice). Scripts ready.
-5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Needs Tinder curation pass.
+5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Dakota manually curated ✅.
 ### HollerKit (Swift)
 
 6. **Fix decoder stuttering on carryover** — "kkk" pattern. Decoder and talker KV cache go out of sync when silence abort skips remaining tokens. Fix: feed remaining silence tokens through decoder without yielding audio (~15 lines). Needs concurrency verification in Swift (old generation task may still be touching decoder). **Same bug confirmed in Python server** — fix both in parallel.
@@ -288,7 +288,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 ### Voices & Training
 
 11. **Add male auto-curate thresholds** — current thresholds reject 100% of male clips. Proposed: HNR > 8, harshness < 5%, peak > -2.
-12. **Tinder curation** — Kit (500 clips) and Dakota (400 clips) need manual listening pass.
+12. ~~**Tinder curation**~~ — ✅ Kit 414/500, Dakota 374/500. Both done.
 13. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
 14. **Full 10-voice train** — once all voices curated, single multi-voice training run.
 15. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
