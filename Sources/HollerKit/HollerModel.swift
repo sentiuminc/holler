@@ -32,7 +32,7 @@ public final class HollerModel: @unchecked Sendable {
         get async { await actor.sampleRate }
     }
 
-    /// Stream production-quality audio (silence-trimmed, faded, retried).
+    /// Stream production-quality audio (silence-trimmed, retried).
     /// Yields chunks as they are generated (~130ms TTFA for first chunk).
     ///
     /// Retry strategy: first attempt streams chunks directly to the caller.

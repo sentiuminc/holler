@@ -10,7 +10,6 @@ public struct HollerConfiguration: Sendable {
     public var silentAbortTokens: Int = 16
     public var speechOnsetThresholdRMS: Float = 0.007
     public var speechOnsetPreRollMs: Float = 150
-    public var fadeOutMs: Float = 20
 
     // Retry
     public var maxRetries: Int = 3

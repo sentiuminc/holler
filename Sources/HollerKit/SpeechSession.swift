@@ -36,6 +36,8 @@ public final class SpeechSession: @unchecked Sendable {
 
     private var cacheState = Qwen3TTSModel.TalkerCacheState()
     private var isFirstSentence = true
+    /// Timestamp when the first sentence started generating.
+    public private(set) var generationStartDate: Date?
 
     /// Audio output stream. Yields chunks as sentences are synthesized.
     public let audio: AsyncThrowingStream<HollerAudioChunk, Error>
@@ -109,6 +111,10 @@ public final class SpeechSession: @unchecked Sendable {
     /// - If first attempt poisons the cache, reset it before retries
     private func synthesizeSentence(_ text: String) async {
         guard !cancelled else { return }
+
+        if generationStartDate == nil {
+            generationStartDate = Date()
+        }
 
         let resetDecoder = isFirstSentence
         let wordCount = text.split(separator: " ").count

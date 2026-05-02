@@ -4,7 +4,6 @@
 /// Applied to complete audio (batch generation):
 /// 1. Onset trim — find speech start with 150ms pre-roll
 /// 2. Trailing silence trim — find speech end, trim silence
-/// 3. 20ms linear fade-out on final samples
 struct GenerationSession {
 
     struct Result: Sendable {
@@ -53,13 +52,6 @@ struct GenerationSession {
             trimmed = Array(trimmed[..<lastSpeechEnd])
         }
 
-        // Fade-out
-        let faded = AudioPostProcessor.applyFadeOut(
-            trimmed,
-            fadeMs: config.fadeOutMs,
-            sampleRate: sampleRate
-        )
-
-        return Result(samples: faded, aborted: false)
+        return Result(samples: trimmed, aborted: false)
     }
 }

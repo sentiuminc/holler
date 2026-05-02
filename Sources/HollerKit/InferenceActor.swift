@@ -186,15 +186,6 @@ actor InferenceActor {
             }
         }
 
-        if let final = pipeline.finish() {
-            if !firstYieldLogged {
-                let yieldElapsed = Date().timeIntervalSince(genStart) * 1000
-                log?("[generate] FIRST YIELD at \(String(format: "%.0f", yieldElapsed))ms "
-                    + "(final chunk, after \(rawChunkIndex) raw chunks)")
-            }
-            yieldChunk(HollerAudioChunk(samples: final, sampleRate: sampleRate))
-        }
-
         let totalElapsed = Date().timeIntervalSince(genStart) * 1000
         log?("[generate] done: \(rawChunkIndex) raw chunks, "
             + "\(String(format: "%.0f", totalElapsed))ms total, "

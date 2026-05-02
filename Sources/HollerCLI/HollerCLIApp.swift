@@ -158,8 +158,12 @@ struct HollerCLI {
         let stats = SessionStats()
 
         let audioTask = Task {
+            var genStart: Date?
             for try await chunk in sess.audio {
-                _ = await stats.recordChunk(chunk.samples, t0: t0)
+                if genStart == nil {
+                    genStart = sess.generationStartDate ?? t0
+                }
+                _ = await stats.recordChunk(chunk.samples, t0: genStart!)
             }
         }
 

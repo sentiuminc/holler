@@ -6,8 +6,6 @@
 /// 1. Skip silent chunks before speech (codec warmup removal)
 /// 2. Sample-level onset trim in first speech chunk (150ms pre-roll)
 /// 3. Buffer post-speech silence; abort after `silentAbortTokens`
-/// 4. Hold-one-back: retain latest chunk so we can apply fadeout on stream end
-/// 5. 20ms linear fade-out on final chunk
 struct StreamingPipeline {
     private let config: HollerConfiguration
     private let sampleRate: Int
@@ -17,7 +15,6 @@ struct StreamingPipeline {
     private var needsPause: Bool
     private var silentChunkCount = 0
     private var pendingSilence: [[Float]] = []
-    private var heldChunk: [Float]?
     private(set) var aborted = false
     private(set) var totalSamplesYielded = 0
 
@@ -41,16 +38,6 @@ struct StreamingPipeline {
         }
     }
 
-    /// Call when the stream ends. Returns the final chunk with fadeout applied, or nil if empty.
-    mutating func finish() -> [Float]? {
-        guard let held = heldChunk else { return nil }
-        heldChunk = nil
-        let faded = AudioPostProcessor.applyFadeOut(held, fadeMs: config.fadeOutMs, sampleRate: sampleRate)
-        totalSamplesYielded += faded.count
-        config.log?("[pipeline] finish: flushed held chunk (\(faded.count) samples, aborted=\(aborted))")
-        return faded
-    }
-
     // MARK: - Pre-speech: waiting for first speech chunk
 
     private mutating func handlePreSpeech(_ samples: [Float]) -> [[Float]] {
@@ -71,9 +58,9 @@ struct StreamingPipeline {
         speechStarted = true
         silentChunkCount = 0
         let trimmed = Array(samples[onset...])
-        heldChunk = trimmed
+        totalSamplesYielded += trimmed.count
         config.log?("[pipeline] speech onset at sample \(onset), trimmed to \(trimmed.count) samples")
-        return []
+        return [trimmed]
     }
 
     // MARK: - Post-speech: yielding chunks, tracking silence
@@ -92,17 +79,14 @@ struct StreamingPipeline {
                 needsPause = false
             }
 
-            if let held = heldChunk {
-                output.append(held)
-                totalSamplesYielded += held.count
-            }
             for pending in pendingSilence {
                 output.append(pending)
                 totalSamplesYielded += pending.count
             }
             pendingSilence.removeAll()
             silentChunkCount = 0
-            heldChunk = samples
+            output.append(samples)
+            totalSamplesYielded += samples.count
         } else {
             pendingSilence.append(samples)
             silentChunkCount += 1

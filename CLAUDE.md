@@ -184,8 +184,8 @@ Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiu
 HollerModel.stream("text", voice:)  →  InferenceActor  →  mlx-audio-swift generateStream()
          ↓                                    ↓                        ↓
    AsyncThrowingStream<Chunk>       StreamingPipeline          Qwen3TTSModel + codec decoder
-         ↓                          (silence trim, abort,
-   Consumer (app/CLI)                fadeout, hold-one-back)
+         ↓                          (silence trim, abort)
+   Consumer (app/CLI)
 ```
 
 **SpeechSession (LLM integration):**
@@ -199,7 +199,7 @@ session.feed(token)  →  SentenceBuffer  →  per-sentence generation  →  ses
 - `HollerModel.swift` — public API: `load()`, `stream()`, `synthesize()`, `makeSession()`
 - `SpeechSession.swift` — LLM integration: `feed()`, `finish()`, `cancel()`, `audio` stream
 - `SentenceBuffer.swift` — text accumulation + sentence boundary detection
-- `StreamingPipeline.swift` — silence onset trim, hold-one-back, fadeout, abort
+- `StreamingPipeline.swift` — silence onset trim, abort
 - `InferenceActor.swift` — serialized MLX access, streaming decode
 - `RetryController.swift` — retry evaluation (too short, no speech, give up)
 - `HollerConfiguration.swift` — all tunables + `log` closure for debug
