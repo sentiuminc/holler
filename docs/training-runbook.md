@@ -99,12 +99,12 @@ Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 fo
 
 ### 1b. Prepare Reference Audio
 
-Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -22 LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
+Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -18 LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
-**⚠️ CRITICAL: Verify ref audio is at -22 LUFS before training.** The model learns loudness from the ref embedding. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — a 6.8 dB gap. Result: Joe too loud, Nora too quiet at inference, even though training clips were both normalized to -22 LUFS. The ref embedding carries loudness information the training data can't override.
+**⚠️ CRITICAL: Verify ref audio is at -18 LUFS before training.** The model learns loudness from the ref embedding. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — a 6.8 dB gap. Result: Joe too loud, Nora too quiet at inference, even though training clips were both normalized. The ref embedding carries loudness information the training data can't override.
 
 ```bash
-# Quick check — all refs should be close to -22 RMS
+# Quick check — all refs should be close to -18 RMS
 .venv-enhance-audio/bin/python -c "
 import soundfile as sf; import numpy as np
 data, sr = sf.read('voices/<name>/ref.wav')
@@ -134,7 +134,7 @@ Uses `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit) via mlx-audio. Ou
 .venv-enhance-audio/bin/python tools/enhance_clips.py --voice <name> --gender <male|female>
 ```
 
-Pipeline: Trim silence → DeepFilterNet3 → LUFS normalize (-22 LUFS) → Spectral de-ess → Dynamic presence.
+Pipeline: Trim silence → DeepFilterNet3 → LUFS normalize (-18 LUFS) → Spectral de-ess → Dynamic presence.
 
 Gender affects de-esser band (male: 4500-7000Hz, female: 6000-9000Hz).
 
@@ -173,8 +173,8 @@ Run analysis on the curated clips and share results with the user before moving 
 **Check these against targets below:**
 - Harshness < 2% (if >2%, data is too hot — check enhancement pipeline or regenerate)
 - Sibilance < 3%
-- LUFS between -25 and -22
-- Peak between -8 and -4 dBFS
+- LUFS between -20 and -16
+- Peak between -4 and -1 dBFS
 - HNR > 14 dB
 - DNSMOS OVRL > 3.0
 
@@ -191,8 +191,8 @@ Reference: Serena (built-in CustomVoice). Based on ear testing at 90% AirPods Pr
 
 | Metric | Target | Why |
 |--------|--------|-----|
-| Peak dBFS | -8 to -4 | Headroom for codec artifacts |
-| LUFS | -25 to -22 | Matches CustomVoice built-ins |
+| Peak dBFS | -4 to -1 | Headroom at -18 LUFS target |
+| LUFS | -20 to -16 | Voice assistant loudness (podcast/Siri level) |
 | Harshness 2-4kHz | < 2% | Predicts ear pain better than volume |
 | Sibilance 4-10kHz | < 3% | Excessive = fatiguing |
 | Presence 1-5kHz | 8-20% | Too low = muffled, too high = sharp |
@@ -210,6 +210,21 @@ Reference comparison:
 | Harshness | 1.4% | 5.7% |
 | Presence | 15.4% | 35.4% |
 
+### Crest Factor and Per-Voice Loudness
+
+LUFS target and peak ceiling interact differently per voice. Voices with high crest factor (sharp transients — hard plosives, deep fundamentals with explosive consonants) will land below the LUFS target because the peak ceiling clamps them down.
+
+**Measured crest factors (2026-05-02):**
+
+| Voice | Crest Factor | LUFS after -18 target | % clips clamped by -1.0 ceiling |
+|-------|-------------|----------------------|--------------------------------|
+| Kit | 16.3 dB | -18.2 (on target) | 16% |
+| Nora | 16.0 dB | -18.2 (on target) | 26% |
+| Joe | 16.9 dB | -18.1 (on target) | 4% |
+| Dakota | 19.3 dB | -19.6 (1.5 dB short) | 90% |
+
+**Rule of thumb:** Check crest factor from originals before enhancing. If >17 dB, the voice will land 1-2 dB below LUFS target — this is fine, don't fight it. Raising the ceiling (tested -0.3 dBFS on Dakota) barely helps and is inaudible. The transients are what make the voice sound like itself.
+
 ### Enhancement Tunable Knobs
 
 **De-esser gender presets:**
@@ -223,7 +238,7 @@ Reference comparison:
 
 **Presence:** 3500-8000 Hz range, max boost 2.5 dB, sensitivity 1.0.
 
-**LUFS:** target -22.0, peak ceiling -3.0 dBFS.
+**LUFS:** target -18.0, peak ceiling -1.0 dBFS.
 
 ### Analysis Tools
 

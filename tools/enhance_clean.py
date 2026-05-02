@@ -18,10 +18,12 @@ What each stage does and why:
 2. K-WEIGHTED LUFS NORMALIZE — measures loudness per ITU-R BS.1770: runs audio
    through two biquad filters (high-shelf pre-filter + high-pass) to mimic how
    human hearing weights frequencies, then measures RMS of the filtered signal
-   and applies -0.691dB offset. Computes gain needed to hit -22 LUFS, then clips
+   and applies -0.691dB offset. Computes gain needed to hit -18 LUFS, then clips
    to a -3dBFS peak ceiling. Linear gain only — no compression, no dynamics.
    Why not RMS+3: the +3 shortcut lands 2-3dB hot depending on spectral content
    (measured: -19.4 LUFS actual vs -22.0 target on Nora using the old shortcut).
+   Target changed from -22 to -18 LUFS (2026-05-02) — voice assistant output
+   should match podcast/Siri loudness, not broadcast TV.
 
 3. IIR NOTCH at 5500Hz (Q=3.0) — single biquad notch filter targeting the
    center of the sibilance band (S, T, Ch sounds). No STFT, no spectral
@@ -41,7 +43,7 @@ Runs in seconds for 500 clips (no model load, pure scipy signal processing).
 
 Usage:
   python enhance_clean.py --input voices/nora/training-data/audio-original --output voices/nora/training-data/audio
-  python enhance_clean.py --input <dir> --output <dir> --notch-freq 5500 --notch-q 3.0 --lufs -22
+  python enhance_clean.py --input <dir> --output <dir> --notch-freq 5500 --notch-q 3.0 --lufs -18
 """
 import argparse
 from pathlib import Path
@@ -82,7 +84,7 @@ def compute_lufs(audio, sr):
     return -70.0
 
 
-def lufs_normalize(audio, sr, target_lufs=-22.0, peak_ceiling=-3.0):
+def lufs_normalize(audio, sr, target_lufs=-18.0, peak_ceiling=-1.0):
     """Normalize to target LUFS with peak ceiling. K-weighted, linear gain only."""
     current = compute_lufs(audio, sr)
     gain_db = target_lufs - current
@@ -100,7 +102,7 @@ def notch_deess(audio, sr, freq=5500, q=3.0):
     return lfilter(b, a, audio).astype(np.float32)
 
 
-def enhance(audio, sr=24000, target_lufs=-22.0, peak_ceiling=-3.0,
+def enhance(audio, sr=24000, target_lufs=-18.0, peak_ceiling=-1.0,
             notch_freq=5500, notch_q=3.0, skip_notch=False):
     audio = trim_silence(audio, sr)
     audio = lufs_normalize(audio, sr, target_lufs, peak_ceiling)
@@ -115,8 +117,8 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--notch-freq", type=float, default=5500)
     parser.add_argument("--notch-q", type=float, default=3.0)
-    parser.add_argument("--lufs", type=float, default=-22.0)
-    parser.add_argument("--peak-ceiling", type=float, default=-3.0)
+    parser.add_argument("--lufs", type=float, default=-18.0)
+    parser.add_argument("--peak-ceiling", type=float, default=-1.0)
     parser.add_argument("--skip-notch", action="store_true")
     args = parser.parse_args()
 

@@ -86,7 +86,7 @@ from pathlib import Path
 VOICES_DIR = Path(__file__).parent.parent / "voices"
 
 THRESHOLDS = {
-    "peak_db": ("Peak > -4 dBFS", lambda v: v > -4),
+    "peak_db": ("Peak > -0.5 dBFS", lambda v: v > -0.5),
     "harsh_2_4k": ("Harshness > 2%", lambda v: v > 0.02),
     "sib_4_10k": ("Sibilance > 3%", lambda v: v > 0.03),
     "hnr_db": ("HNR < 14 dB", lambda v: v < 14),

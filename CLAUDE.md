@@ -237,7 +237,7 @@ Quick reference tools:
 .venv-enhance-audio/bin/python tools/curate_clips.py --voice <name>
 ```
 
-**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS (-22 LUFS per ITU-R BS.1770) → IIR notch at 5500Hz Q=3.0. `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
+**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS (-18 LUFS, voice assistant loudness) → IIR notch at 5500Hz Q=3.0. `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
 
 ## Community References
 
