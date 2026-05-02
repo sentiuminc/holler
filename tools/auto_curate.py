@@ -1,5 +1,28 @@
 #!/usr/bin/env python3
-"""Auto-curate training data by rejecting clips that fail quality thresholds.
+"""[DEPRECATED — not part of the active pipeline. Keep for reference and future use.]
+
+== WHY DEPRECATED ==
+
+Thresholds were calibrated against Cartesia's CustomVoice built-in voices
+(Serena = gold standard, real recorded audio). For clean synthetic cloner output
+(1.7B-Base-bf16 + enhance_clean.py), they are too aggressive:
+
+- HNR < 14 dB rejects ~25% of clips that sound fine to the ear. Low HNR on
+  synthetic audio often just reflects certain phonemes or sentences, not actual
+  voice quality problems. Tested on Nora 2026-05-02: 69/500 rejected by HNR,
+  only ~6 of those were audibly rough. The rest sounded fine.
+- Manual tinder curation (curate_clips.py) catches real problems by ear —
+  wrong emphasis, pacing, voice drift, EOS cutoffs — which metrics can't detect.
+  It makes this automated gate redundant.
+
+The current pipeline is: generate → enhance_clean.py → curate_clips.py (manual).
+Auto-curation sits between those two and adds noise, not signal.
+
+May be useful again for: real mic recordings with actual noise, future cloners
+with lower quality output, or bulk-processing many voices without time to listen.
+The analyze_voice_quality.py tool still runs the same metrics without rejecting.
+
+----------------------------------------------------------------------
 
 == WHAT THIS DOES ==
 
