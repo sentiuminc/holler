@@ -1,5 +1,5 @@
 #!/bin/bash
-# Vast.ai instance setup for Holler: training data generation + model training.
+# Vast.ai instance setup for Holler: model training (SFT).
 # Run once after SSH is up. Assumes /workspace exists (Vast.ai default).
 #
 #   ssh root@<instance> 'bash -s' < remote_setup.sh
@@ -28,10 +28,6 @@ $PIP install -q -U pip
 echo "=== Installing torch 2.6 + torchaudio ==="
 $PIP install -q torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
-# ── Inference: faster-qwen3-tts (CUDA graphs + StaticCache) ──────────
-echo "=== Installing faster-qwen3-tts ==="
-$PIP install -q faster-qwen3-tts soundfile numpy
-
 # ── Training: qwen-tts + flash-attn ──────────────────────────────────
 echo "=== Installing qwen-tts + training deps ==="
 $PIP install -q -U qwen-tts huggingface_hub safetensors
@@ -44,9 +40,6 @@ MAX_JOBS=4 $PIP install -q flash-attn==2.7.3 --no-build-isolation --no-cache-dir
 # ── Models ────────────────────────────────────────────────────────────
 cd /workspace
 mkdir -p models
-
-echo "=== Downloading 1.7B-Base (voice cloning / data generation) ==="
-$VENV/bin/hf download Qwen/Qwen3-TTS-12Hz-1.7B-Base --local-dir models/1.7B-Base --quiet
 
 echo "=== Downloading 0.6B-Base (training starting checkpoint) ==="
 $VENV/bin/hf download Qwen/Qwen3-TTS-12Hz-0.6B-Base --local-dir models/0.6B-Base --quiet
@@ -81,14 +74,10 @@ echo "Disk:    $(df -h /workspace | tail -1 | awk '{print $4 " free / " $2 " tot
 echo "Python:  $($PY --version 2>&1 | awk '{print $2}')"
 echo "Torch:   $($PY -c 'import torch; print(torch.__version__)')"
 echo "CUDA:    $($PY -c 'import torch; print(torch.version.cuda)')"
-$PY -c "from faster_qwen3_tts import FasterQwen3TTS; print('faster-qwen3-tts: OK')" 2>/dev/null \
-  || echo "faster-qwen3-tts: NOT WORKING"
 echo
 echo "Next steps:"
-echo "  1. Upload ref.wav files:  scp voice.wav root@\$(hostname):/workspace/voices/"
-echo "  2. Upload scripts:        scp remote_generate_training_data.py corpus.json root@\$(hostname):/workspace/"
-echo "  3. Generate:              $PY /workspace/remote_generate_training_data.py \\"
-echo "                              --ref-audio /workspace/voices/ref.wav \\"
-echo "                              --ref-text '...' --output /workspace/output/voice_name"
-echo "  4. Download results:      scp -r root@\$(hostname):/workspace/output/ ~/Downloads/"
+echo "  1. Upload training data:  scp -r voices/<name>/training-data root@\$(hostname):/workspace/training-data/<name>/"
+echo "  2. Upload training scripts: scp training/sft_12hz_multivoice.py root@\$(hostname):/workspace/"
+echo "  3. Train:                 bash /workspace/remote_train_multivoice.sh"
+echo "  4. Download checkpoint:   scp -r root@\$(hostname):/workspace/checkpoints/ ~/Downloads/"
 echo

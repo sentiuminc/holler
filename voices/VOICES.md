@@ -105,4 +105,4 @@ The remaining 27 voices will be assigned slots 3003-3029 during training. Katie 
 
 ## Design Process
 
-Use `Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` to generate reference audio for each voice from a character description. Multiple rounds of candidates per voice, pick the best. Clone 500 training clips per voice via 1.7B-Base-bf16 on GPU (Vast.ai). Enhance with `enhance_clean.py`. Manually curate with clip tinder before training.
+Use `Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` to generate reference audio for each voice from a character description. Multiple rounds of candidates per voice, pick the best. Clone 500 training clips per voice via 1.7B-Base-bf16 locally on Mac (mlx-audio). Enhance with `enhance_clean.py`. Manually curate with clip tinder before training.

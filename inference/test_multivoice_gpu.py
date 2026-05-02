@@ -1,6 +1,5 @@
 """
 Multi-voice GPU inference test. Generates samples for both voices from a checkpoint.
-Tries faster-qwen3-tts (CUDA graphs) first, falls back to standard qwen_tts.
 
 Usage:
   python3 test_multivoice_gpu.py --checkpoint /workspace/output/checkpoint-epoch-0
@@ -79,65 +78,17 @@ def run_standard_inference(checkpoint_path, output_dir):
     torch.cuda.empty_cache()
 
 
-def run_faster_inference(checkpoint_path, output_dir):
-    try:
-        from faster_qwen3_tts import FasterQwen3TTS
-    except ImportError:
-        print("faster-qwen3-tts not installed, skipping")
-        return
-
-    print("\n=== Faster inference (CUDA graphs) ===")
-    model = FasterQwen3TTS.from_pretrained(checkpoint_path)
-
-    config = load_config(checkpoint_path)
-    voice_slots = config.get("talker_config", {}).get("spk_id", {})
-    print(f"Voice slots: {voice_slots}")
-
-    for voice in VOICES:
-        if voice not in voice_slots:
-            print(f"WARNING: {voice} not in checkpoint, skipping")
-            continue
-
-        voice_dir = os.path.join(output_dir, f"faster-{voice}")
-        os.makedirs(voice_dir, exist_ok=True)
-
-        for i, text in enumerate(TEST_TEXTS):
-            t0 = time.time()
-            audio_chunks, sr = model.generate_custom_voice(
-                text=text,
-                speaker=voice,
-                language="english",
-                temperature=0.6,
-            )
-            elapsed = time.time() - t0
-            audio = np.concatenate([c.cpu().numpy() if hasattr(c, 'cpu') else np.asarray(c) for c in audio_chunks]).squeeze()
-            duration = len(audio) / sr
-            rtf = duration / elapsed if elapsed > 0 else 0
-            peak = np.abs(audio).max()
-            out_path = os.path.join(voice_dir, f"test_{i:02d}.wav")
-            sf.write(out_path, audio, sr)
-            print(f"  [{voice}] {i:02d}: {elapsed:.1f}s gen, {duration:.1f}s audio, RTF {rtf:.2f}, peak {peak:.3f} | {text[:50]}")
-
-    del model
-    torch.cuda.empty_cache()
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", default="/workspace/samples")
-    parser.add_argument("--standard-only", action="store_true")
-    parser.add_argument("--faster-only", action="store_true")
     args = parser.parse_args()
 
     epoch = args.checkpoint.rstrip("/").split("-")[-1]
     output_dir = os.path.join(args.output, f"epoch-{epoch}")
     os.makedirs(output_dir, exist_ok=True)
 
-    if not args.faster_only:
-        run_standard_inference(args.checkpoint, output_dir)
-    if not args.standard_only:
-        run_faster_inference(args.checkpoint, output_dir)
+    run_standard_inference(args.checkpoint, output_dir)
 
     print(f"\nAll samples saved to {output_dir}")
 

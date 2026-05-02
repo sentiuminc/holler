@@ -14,7 +14,7 @@
 #   /workspace/Qwen3-TTS/finetuning/  (repo cloned by remote_setup.sh)
 #   /workspace/models/0.6B-Base/      (downloaded by remote_setup.sh)
 #   /workspace/models/Tokenizer-12Hz/ (downloaded by remote_setup.sh)
-#   /workspace/sft_12hz_patched.py    (uploaded by you)
+#   /workspace/sft_12hz.py    (uploaded by you)
 set -e
 
 PY=/workspace/.venv/bin/python3
@@ -32,11 +32,11 @@ $PY prepare_data.py \
   --input_jsonl /workspace/training-data/train_curated.jsonl \
   --output_jsonl /workspace/training-data/train_with_codes.jsonl
 
-cp /workspace/sft_12hz_patched.py .
+cp /workspace/sft_12hz.py .
 
 echo ""
 echo "=== Training $VOICE (lr=1e-7, 2 epochs, fractional checkpoints) ==="
-$PY sft_12hz_patched.py \
+$PY sft_12hz.py \
   --init_model_path /workspace/models/0.6B-Base \
   --output_model_path /workspace/output \
   --train_jsonl /workspace/training-data/train_with_codes.jsonl \

@@ -13,7 +13,7 @@ Authoritative doc for training Qwen3-TTS 0.6B custom voices. Covers single-voice
 ### Single-Voice
 
 ```bash
-python3 sft_12hz_patched.py \
+python3 sft_12hz.py \
   --init_model_path /path/to/Qwen3-TTS-12Hz-0.6B-Base \
   --output_model_path /path/to/output \
   --train_jsonl /path/to/train_curated.jsonl \
@@ -43,7 +43,7 @@ python3 sft_12hz_multivoice.py \
 ### Critical Rules
 
 - **lr=1e-7 is non-negotiable.** Higher LRs (2e-6, 2e-5) destroy EOS token — model generates until max_new_tokens.
-- **Only code patch needed:** Wrap `text_embedding` with `text_projection` in the forward pass (fixes 0.6B dimension mismatch where text_embed=2048 but codec_embed=1024). Already in `sft_12hz_patched.py` and `sft_12hz_multivoice.py`.
+- **Only code patch needed:** Wrap `text_embedding` with `text_projection` in the forward pass (fixes 0.6B dimension mismatch where text_embed=2048 but codec_embed=1024). Already in `sft_12hz.py` and `sft_12hz_multivoice.py`.
 - **Do NOT apply** the "double label shift" fix or "remove sub-codebook loop" fix at this LR — they break training.
 - **EOS termination is THE diagnostic.** If PyTorch inference hits max_new_tokens on a short sentence, the model is broken.
 - **Always verify with PyTorch inference on GPU first.** It's ground truth. MLX issues are separable from training issues.
@@ -117,40 +117,16 @@ print(f'Peak: {20*np.log10(np.max(np.abs(data))+1e-10):.1f} dBFS')
 
 500 clips via 1.7B-Base voice cloning. Temperature **0.85** (0.6 = monotone — F0 range 168 Hz vs 235 Hz at 0.85). Do NOT append trailing silence — it masks abrupt cutoffs instead of exposing them.
 
-**Option A: GPU on Vast.ai (~25 min per voice, recommended)**
-
-Use vanilla `qwen-tts` on a rented 3090. Runs at 0.7x RTF — 500 clips in ~25 min per voice.
-
-```bash
-# Upload ref audio
-scp -i ~/.ssh/runpod -P <PORT> voices/<voice>/ref.wav root@<HOST>:/workspace/voices/<voice>_ref.wav
-
-# Upload generation script + corpus (if not already on instance)
-scp -i ~/.ssh/runpod -P <PORT> training/remote_generate_training_data.py training/corpus.json root@<HOST>:/workspace/
-
-# Generate (runs vanilla qwen-tts, single worker)
-ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> \
-  "/workspace/.venv/bin/python3 /workspace/run_vanilla.py"
-# Or use the multi-worker script with --workers 1 for vanilla-quality output
-
-# Download results
-mkdir -p voices/<voice>/training-data/audio-original
-scp -i ~/.ssh/runpod -P <PORT> "root@<HOST>:/workspace/output/<voice>/*.wav" \
-  voices/<voice>/training-data/audio-original/
-scp -i ~/.ssh/runpod -P <PORT> "root@<HOST>:/workspace/output/<voice>/train.jsonl" \
-  voices/<voice>/training-data/
-```
-
-**⚠️ Do NOT use `faster-qwen3-tts` for training data generation.** Its StaticCache + CUDA graphs degrade voice cloning fidelity — clips randomly lose the reference voice identity. Tested and confirmed 2026-04-28. Use vanilla `qwen-tts` (`Qwen3TTSModel.from_pretrained()` + `generate_voice_clone()`). faster-qwen3-tts is fine for checkpoint verification (fine-tuned voices via `generate_custom_voice()`), just not for ref-audio voice cloning.
-
-**Option B: Local on Mac (~1.5 hours per voice)**
+**Generate locally on Mac:**
 
 ```bash
 cd holler && .venv/bin/python tools/generate_training_data.py \
   --voice <name> --ref-text "<exact transcript of ref.wav>"
 ```
 
-Uses `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit) via mlx-audio. Outputs to `voices/<name>/training-data/audio-original/` + `train.jsonl`.
+Uses `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit) via mlx-audio. Outputs to `voices/<name>/training-data/audio-original/` + `train.jsonl`. ~25 min per voice on M1 Pro.
+
+**Legacy:** `training/remote_generate_training_data.py` exists for GPU generation on Vast.ai but is no longer used — local generation is the same speed with less hassle.
 
 ### 3. Enhance Clips (~3 min)
 
@@ -185,7 +161,7 @@ Writes `rejects_auto.txt` + `train_curated.jsonl`. Never deletes audio files.
 
 Tinder-style swipe for prosody issues metrics can't catch.
 
-### 6. Verify Before GPU
+### 6. Verify Before Training
 
 Run analysis on the curated clips and share results with the user before moving to GPU training:
 
@@ -207,7 +183,7 @@ Run analysis on the curated clips and share results with the user before moving 
 - `ref.wav` exists in `training-data/`
 - Auto-curate rejection rate is reasonable (<35% for female, <50% for male — if >50% male, data quality is suspect, consider regenerating)
 
-Share results with the user before renting a GPU — a quick sanity check avoids wasting GPU time on bad data (learned the hard way with Joe's 89% rejection rate).
+Share results with the user before training — a quick sanity check avoids wasting GPU time on bad data (learned the hard way with Joe's 89% rejection rate).
 
 ### Audio Quality Targets
 
@@ -286,7 +262,7 @@ scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_setup.sh root@<HOST>:/work
 ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_setup.sh"
 ```
 
-Setup installs: torch 2.6, qwen-tts, faster-qwen3-tts, flash-attn 2.7.3, sox, bmon/nvtop/htop. Downloads 1.7B-Base (data generation) + 0.6B-Base (training) + Tokenizer-12Hz. Takes ~5 min.
+Setup installs: torch 2.6, qwen-tts, flash-attn 2.7.3, sox, bmon/nvtop/htop. Downloads 0.6B-Base (training) + Tokenizer-12Hz. Takes ~5 min.
 
 **HuggingFace CLI:** Use `hf download` (not the deprecated `huggingface-cli download` or `python -m huggingface_hub.commands.hf_cli`). The `hf` binary is at `$VENV/bin/hf` after installing `huggingface_hub`.
 
@@ -298,17 +274,27 @@ ssh root@<HOST> "mkdir -p /workspace/training-data"
 rsync -avz -e "ssh -i ~/.ssh/runpod -p <PORT>" voices/<voice>/training-data/audio/ root@<HOST>:/workspace/training-data/audio/
 scp -P <PORT> voices/<voice>/training-data/ref.wav root@<HOST>:/workspace/training-data/
 scp -P <PORT> voices/<voice>/training-data/train_curated.jsonl root@<HOST>:/workspace/training-data/
-scp -P <PORT> training/sft_12hz_patched.py root@<HOST>:/workspace/
+scp -P <PORT> training/sft_12hz.py root@<HOST>:/workspace/
 ```
 
 **Multi-voice:**
+
+First, build the combined JSONL locally:
 ```bash
-ssh root@<HOST> "mkdir -p /workspace/training-data/nora/audio /workspace/training-data/joe/audio"
-rsync -avz voices/nora/training-data/audio/ root@<HOST>:/workspace/training-data/nora/audio/
-rsync -avz voices/joe/training-data/audio/ root@<HOST>:/workspace/training-data/joe/audio/
-scp voices/nora/training-data/ref.wav root@<HOST>:/workspace/training-data/nora/
-scp voices/joe/training-data/ref.wav root@<HOST>:/workspace/training-data/joe/
-scp training/multivoice_nora_joe_curated.jsonl root@<HOST>:/workspace/training-data/
+python training/build_combined_jsonl.py --voices kit dakota nora joe
+```
+
+Then upload everything:
+```bash
+# Upload per-voice training data
+for voice in kit dakota nora joe; do
+  ssh root@<HOST> "mkdir -p /workspace/training-data/$voice/audio"
+  rsync -avz voices/$voice/training-data/audio/ root@<HOST>:/workspace/training-data/$voice/audio/
+  scp voices/$voice/training-data/ref.wav root@<HOST>:/workspace/training-data/$voice/
+done
+
+# Upload combined JSONL + training script
+scp training/train_multivoice.jsonl root@<HOST>:/workspace/training-data/
 scp training/sft_12hz_multivoice.py root@<HOST>:/workspace/
 ```
 
@@ -316,7 +302,7 @@ scp training/sft_12hz_multivoice.py root@<HOST>:/workspace/
 
 **Single-voice:** `bash /workspace/remote_train.sh <voice>`
 
-**Multi-voice:** `bash /workspace/remote_train_multivoice.sh`
+**Multi-voice:** `bash /workspace/remote_train_multivoice.sh kit:3000 dakota:3001 nora:3002 joe:3003`
 
 Both scripts handle tokenization (via `prepare_data.py`) and training. ~5 min for 400 clips on A100, ~10-15 min on 3090.
 
@@ -327,8 +313,6 @@ Run PyTorch inference on the checkpoint before downloading. Use `inference/test_
 - EOS terminates (no runaways)
 - Audio lengths proportional to text
 - Peaks < 1.0 (no hard clipping)
-
-**For faster inference:** `pip install faster-qwen3-tts` — CUDA graph optimization, ~3x speedup on 3090. Uses `FasterQwen3TTS.from_pretrained()` + `generate_custom_voice()`. Fine for checkpoint verification (fine-tuned voices), just don't use it for ref-audio voice cloning (degrades voice identity — see Step 2 warning).
 
 ### Step 5: Download + Quantize Locally
 

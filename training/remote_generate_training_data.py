@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Fast GPU training data generation for Holler voices.
+"""LEGACY — GPU training data generation for Holler voices.
 
-Uses faster-qwen3-tts (CUDA graphs + StaticCache) with multiple model
-instances on a single GPU for maximum throughput.
-
-The 1.7B-Base model uses ~5-6 GB VRAM per instance. A 3090 (24 GB) fits
-2-3 instances. Each instance achieves ~3-4x RTF via CUDA graphs; parallel
-instances multiply wall-clock throughput.
-
-Requires: faster-qwen3-tts, soundfile, numpy, torch (all installed by remote_setup.sh)
+We recommend just generating training data locally on Apple Silicon instead.
+Use tools/generate_training_data.py — it's literally the same speed and way simpler.
+This script is kept for reference but is no longer the standard workflow.
 
 Usage:
   # Quick test — 100 clips, 3 workers

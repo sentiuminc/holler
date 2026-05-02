@@ -1,30 +1,19 @@
 # coding=utf-8
-# Qwen3-TTS 0.6B-Base fine-tuning — WORKING recipe for custom voice.
+# Qwen3-TTS 0.6B-Base single-voice fine-tuning.
+# Based on upstream finetuning/sft_12hz.py with text_projection wrap for 0.6B
+# (text_embedding is dim 2048, codec_embedding is dim 1024).
 #
-# THIS IS A PATCHED VERSION of upstream finetuning/sft_12hz.py with ONE change:
-#   Line ~89 wraps `text_embedding` with `text_projection` — required for 0.6B
-#   because text_embedding is dim 2048 while codec_embedding is dim 1024.
-#   Without this patch, 0.6B training fails with a dimension mismatch error.
+# For multi-voice training, use sft_12hz_multivoice.py instead.
 #
-# DO NOT apply other "fixes" circulating in the community (double-shift fix,
-# sub-codebook loop removal). At low learning rates those break training.
-#
-# Winning recipe (confirmed on 2026-04-21 by Chris Nagy, ivi project):
-#   python3 sft_12hz_patched.py \
+# Usage:
+#   python3 sft_12hz.py \
 #     --init_model_path /workspace/models/0.6B-Base \
 #     --output_model_path /workspace/output \
 #     --train_jsonl /workspace/training-data/train_with_codes.jsonl \
 #     --batch_size 2 \
 #     --lr 1e-7 \
 #     --num_epochs 2 \
-#     --speaker_name katie
-#
-# Voice naming convention: fantasy names (katie, joe, ...). Default is katie —
-# the first ivi voice, at slot 3000. Future voices get 3001, 3002, ... in the
-# 3000–3071 custom-voice region.
-#
-# Epoch 1 checkpoint is the pick: voice accurate, emotion present, EOS clean.
-# See ~/Desktop/Files/AI/ivi/audio-test/qwen3-tts-finetune/README.md for full notes.
+#     --speaker_name kit
 
 import argparse
 import json

@@ -1,8 +1,8 @@
 # coding=utf-8
 # Qwen3-TTS 0.6B-Base multi-voice fine-tuning.
-# Adapts sft_12hz_patched.py (rekuenkdr single-voice recipe) to train N voices jointly.
+# Adapts sft_12hz.py (rekuenkdr single-voice recipe) to train N voices jointly.
 #
-# Key changes vs sft_12hz_patched.py:
+# Key changes vs sft_12hz.py:
 #   1. JSONL entries must include a `voice_name` field per sample
 #   2. Dataset passes voice_name through batch (wrapped collate_fn)
 #   3. target_speaker_embeddings is a dict: voice_name -> first-seen embedding

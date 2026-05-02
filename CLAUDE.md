@@ -89,7 +89,6 @@ holler/
 │   ├── sessions/          — Old session logs (moved to ivi/logs/)
 │   └── runs/              — Raw training/inference logs
 └── docs/
-    ├── ivi-session-notes.md        — Full debugging journey + v7 addendum
     └── handover-lora-failure.md    — Historical: why LoRA doesn't work
 ```
 
@@ -152,7 +151,7 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 1. mlx-audio calls `mx.eval()` + `mx.clear_cache()` after every streaming chunk (Metal pipeline thrashing)
 2. We use a custom generate loop with one `mx.eval()` per token, chunked decode with two-phase TTFA
 3. We use 12 of 16 codebooks by default (configurable), skipping highest-frequency acoustic detail
-4. Full details: see `RESEARCH.md` (27 experiments logged)
+4. Full details: see `ivi/logs/2026-04-24-holler-rtf-optimization-research.md` (27 experiments logged)
 
 ## Inference Pipeline
 
@@ -244,7 +243,7 @@ Quick reference tools:
 
 ## Hard-Won Lessons
 
-Training lessons are in `docs/training-runbook.md`. Inference lessons below (see also `RESEARCH.md` for full 27-experiment log):
+Training lessons are in `docs/training-runbook.md`. Inference lessons below (see also `ivi/logs/2026-04-24-holler-rtf-optimization-research.md` for full 27-experiment log):
 
 - Custom generate loop = 2.3x faster than mlx-audio's streaming mode (no per-chunk `mx.clear_cache()` thrashing)
 - Code predictor is 71% of generation time (15 sequential 5-layer transformers per token)
@@ -257,7 +256,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 ## What's NOT Known / Unresolved
 
 - Whether joint training at 30 voices holds up (only tested at 2)
-- Root cause of v7 quality issues (Katie noise, Joe clipping) — see docs/ivi-session-notes.md "Observations" section
+- Root cause of v7 quality issues (Katie noise, Joe clipping) — see ivi/logs/2026-04-21-qwen3-tts-training-session.md
 - Whether sequential training (one voice at a time, cumulative checkpoints) works better than joint
 - Optimal voice count per training run
 - Whether mixed precision (e.g. higher bits for code_predictor, lower for talker) could improve quality at same average bits

@@ -1,6 +1,5 @@
 """Local mlx-audio inference on the multi-voice v7 checkpoint.
-Generates 10 test clips per voice (katie, joe) using the same texts used
-remotely on the Vast instance, so we can A/B v7-local vs v7-remote.
+Generates 10 test clips per voice (katie, joe) using the standard test texts.
 """
 import os
 import time
