@@ -28,8 +28,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Quantization:** 6-bit affine g64 is the pick.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
 - **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
-- **Auto-curate thresholds need male adjustment:** Current thresholds reject 100% of male voice clips. HNR < 14 and harshness > 2% are female-calibrated. Proposed male: HNR > 8, harshness < 5%, peak > -2.
-- **Training data tools:** Full pipeline automated — `tools/regenerate_rejects.py`, `tools/enhance_clips.py`, `tools/trim_and_merge.py`, `tools/curate_clips.py`.
+- **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py`. `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
 
 ## Structure
@@ -62,15 +61,15 @@ holler/
 │   ├── dakota/            — Male voice "Trail Guide" (VoiceDesign, slot 3001) ← CONFIRMED
 │   │   ├── ref.wav        — dakota03_trail_guide
 │   │   └── training-data/ — 500 clips, 374 manually curated ✅
-│   │       ├── audio/           — 400 enhanced clips
-│   │       ├── audio-original/  — 400 raw clips from 3090
+│   │       ├── audio/           — 500 enhanced clips
+│   │       ├── audio-original/  — 500 raw clips from 3090
 │   │       └── train.jsonl
 │   ├── katie/             — Female voice (DEV ONLY, not shipping)
 │   │   └── training-data/ — 452 curated clips
 │   ├── nora/              — Female voice (VoiceDesign, slot 3002)
-│   │   └── training-data/ — 500 clips, 366 curated
+│   │   └── training-data/ — 500 clips, manual curation in progress
 │   └── joe/               — Male voice (VoiceDesign, slot 3003)
-│       └── training-data/ — 500 clips, 53 curated (89% rejection — needs regen or relaxed thresholds)
+│       └── training-data/ — 500 clips, needs manual tinder pass
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (dev voice, not shipping)
 │   ├── nora-joe-v1/       — 2.3GB bf16, multi-voice (reference for training quality)
@@ -223,19 +222,15 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 
 Quick reference tools:
 ```bash
-# Enhance training data (cloned from 1.7B-Base — may have noise from ref)
-.venv-enhance-audio/bin/python tools/enhance_clips.py --voice <name> --gender <male|female>
-# Enhance VoiceDesign output (already-clean TTS — no DeepFilter, no STFT)
-.venv-enhance-audio/bin/python tools/enhance_voicedesign.py --input <dir> --output <dir>
-# Auto-curate (report, then --apply)
-.venv-enhance-audio/bin/python tools/auto_curate.py --voice <name>
+# Enhance training data (current standard for all synthetic TTS output)
+.venv-enhance-audio/bin/python tools/enhance_clean.py --voice <name>
 # Analyze quality
 .venv-enhance-audio/bin/python tools/analyze_voice_quality.py --source <dir> --label <name> --n 80
+# Manual curation tinder
+.venv-enhance-audio/bin/python tools/curate_clips.py --voice <name>
 ```
 
-**Two enhancement pipelines exist — use the right one:**
-- `enhance_clips.py` — for training data cloned from real-world ref audio. Full pipeline: DeepFilter → LUFS → STFT de-ess → presence.
-- `enhance_voicedesign.py` — for VoiceDesign candidate output. Lightweight: trim → LUFS → IIR notch. DeepFilter and STFT processing create chirping/musical noise artifacts on already-clean synthetic audio.
+**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS (-22 LUFS per ITU-R BS.1770) → IIR notch at 5500Hz Q=3.0. `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
 
 ## Community References
 
@@ -287,9 +282,10 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ### Voices & Training
 
-11. **Add male auto-curate thresholds** — current thresholds reject 100% of male clips. Proposed: HNR > 8, harshness < 5%, peak > -2.
-12. ~~**Tinder curation**~~ — ✅ Kit 414/500, Dakota 374/500. Both done.
-13. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
+11. **Finish Nora curation** — manual tinder pass in progress. Export train_curated.jsonl when done.
+12. **Joe tinder pass** — 500 clips enhanced with enhance_clean.py. Needs manual curation.
+13. ~~**Tinder curation**~~ — ✅ Kit 414/500, Dakota 374/500. Both done.
+14. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
 14. **Full 10-voice train** — once all voices curated, single multi-voice training run.
 15. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
 
