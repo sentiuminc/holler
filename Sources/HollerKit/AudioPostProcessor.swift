@@ -1,3 +1,4 @@
+// No production callers currently — kept as utility infrastructure.
 public enum AudioPostProcessor {
 
     /// Generate silence of a given duration.
