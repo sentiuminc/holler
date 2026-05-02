@@ -8,7 +8,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **License:** The base Qwen3-TTS model is Apache 2.0. Our fine-tune scripts and voices will also be Apache 2.0. All releases must include proper attribution to Qwen/Alibaba.
 
-**Focus:** Mac. Local inference on Apple Silicon specifically. The training can happen on any CUDA GPU, but the inference target is mlx-audio on M-series Macs.
+**Focus:** Mac. Training data generation runs locally on Apple Silicon via mlx-audio. Training (SFT) requires a CUDA GPU (Vast.ai). Inference target is mlx-audio on M-series Macs.
 
 ## HARD RULES
 
@@ -24,7 +24,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
 - **Kit + Dakota (current):** 2-voice checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good.
 - **Voices confirmed for Holler v1:** Kit (Prism), Dakota (Trail Guide), plus 8 more TBD from 22 curated candidates.
-- **Training data generated on GPU:** Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF. Scripts at `training/remote_generate_training_data.py` + `training/corpus.json`. **Do NOT use `faster-qwen3-tts` for voice cloning** — it breaks voice identity.
+- **Training data generated locally:** `tools/generate_training_data.py` using `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac.
 - **Quantization:** 6-bit affine g64 is the pick.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
 - **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
@@ -56,13 +56,13 @@ holler/
 │   │   ├── ref.wav        — kit08_prism_clear
 │   │   └── training-data/ — 500 clips, 414 manually curated ✅
 │   │       ├── audio/           — 500 enhanced clips
-│   │       ├── audio-original/  — 500 raw clips from 3090
+│   │       ├── audio-original/  — 500 raw clips from local generation
 │   │       └── train.jsonl
 │   ├── dakota/            — Male voice "Trail Guide" (VoiceDesign, slot 3001) ← CONFIRMED
 │   │   ├── ref.wav        — dakota03_trail_guide
 │   │   └── training-data/ — 500 clips, 374 manually curated ✅
 │   │       ├── audio/           — 500 enhanced clips
-│   │       ├── audio-original/  — 500 raw clips from 3090
+│   │       ├── audio-original/  — 500 raw clips from local generation
 │   │       └── train.jsonl
 │   ├── katie/             — Female voice (DEV ONLY, not shipping)
 │   │   └── training-data/ — 452 curated clips
@@ -98,10 +98,10 @@ holler/
 **Read `docs/training-runbook.md` first.** It is the authoritative, complete reference for all training: recipe, multi-voice, GPU runbook, data pipeline, quantization, quality targets, and hard-won lessons. Everything below is a quick summary.
 
 - **Recipe:** lr=1e-7, 2 epochs, batch_size=2, bf16. Loss stays ~12-15 (correct).
-- **Single-voice:** `training/sft_12hz_patched.py` — text_projection patch for 0.6B.
+- **Single-voice:** `training/sft_12hz.py`
 - **Multi-voice:** `training/sft_12hz_multivoice.py` — per-voice JSONL with `voice_name` field, cached embedding injection (bug fixed 2026-04-27).
 - **Quantization:** 6-bit affine g64 via `mlx_audio.convert`. **Must manually copy `speech_tokenizer/model.safetensors` after** (converter bug).
-- **GPU:** Vast.ai, 3090+ ($0.12-0.50/hr), `remote_setup.sh` + `remote_train_multivoice.sh`.
+- **GPU (training only):** Vast.ai, 3090+ ($0.12-0.50/hr), `remote_setup.sh` + `remote_train_multivoice.sh`.
 
 ## Inference Architecture (updated 2026-04-24)
 
@@ -216,9 +216,9 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
-## Voice Data Pipeline & GPU Training
+## Voice Data Pipeline & Training
 
-**All in `docs/training-runbook.md`.** Covers voice design, data generation, enhancement, curation, GPU setup, training, quantization, and all environment gotchas. Read it fully before any training work.
+**All in `docs/training-runbook.md`.** Covers voice design, data generation (local), enhancement, curation, GPU training, quantization, and all environment gotchas. Read it fully before any training work.
 
 Quick reference tools:
 ```bash
@@ -252,7 +252,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 - Two-phase streaming: first chunk at 3 tokens (~120ms TTFA), then 40-token chunks
 - `psutil RSS` is garbage for MLX memory — use `mx.metal.get_active_memory()`
 - Leading 220ms silence is architectural (all codec LMs) — trim at inference or overlap with LLM streaming
-- On GPU: `faster-qwen3-tts` (pip) gives ~3x speedup via CUDA graphs (kernel launch overhead is the bottleneck, not compute)
+
 
 ## What's NOT Known / Unresolved
 
@@ -270,7 +270,7 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE.
 2. ~~**Try alternative quantization**~~ — ✅ DONE. 6-bit affine g64 wins.
 3. ~~**Enhance training audio**~~ — ✅ Pipeline proven.
-4. ~~**GPU training data generation**~~ — ✅ DONE. Vanilla `qwen-tts` on Vast.ai 3090. 0.7x RTF (~25 min/voice). Scripts ready.
+4. ~~**Training data generation**~~ — ✅ DONE. Local on Mac via mlx-audio 1.7B-Base-bf16. `tools/generate_training_data.py`.
 5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Dakota manually curated ✅.
 ### HollerKit (Swift)
 

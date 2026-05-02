@@ -66,30 +66,29 @@ await session.finish()
 
 ### CLI
 
-The package includes a command-line tool for testing. Build once, then run directly:
+The package includes a command-line tool for testing:
 
 ```bash
-# Build (one time — takes ~3 min, compiling MLX + audio dependencies)
-xcodebuild -scheme holler -configuration Release -destination 'platform=macOS' -derivedDataPath .build/xcode -quiet
-alias holler=.build/xcode/Build/Products/Release/holler
+# Build once (~3 min first time)
+./build.sh
 
 # Speak text through your speakers
-holler --text "Hello world" --talk
+./holler --text "Hello world" --talk
 
 # Save to file
-holler --text "Hello world" --output hello.wav
+./holler --text "Hello world" --output hello.wav
 
 # Simulate LLM streaming (token-by-token with sentence buffering)
-holler --session --text "Sure. Let me check that for you. I think the answer is forty two."
+./holler --session --text "Sure. Let me check that for you. I think the answer is forty two."
 
 # Benchmark
-holler --benchmark
+./holler --benchmark
 
 # Debug mode — see the full pipeline (sentence splits, chunk RMS, cache state, retries)
-holler --session --debug --text "Your text here"
+./holler --session --debug --text "Your text here"
 ```
 
-> **Why xcodebuild?** MLX requires compiled Metal shaders (`.metallib`) which only Xcode can build. `swift build` compiles the Swift code but skips Metal, so the binary crashes at runtime.
+> `build.sh` uses xcodebuild under the hood because MLX requires compiled Metal shaders (`.metallib`) which only Xcode can produce. `swift build` compiles the Swift code but skips Metal.
 
 ### Configuration
 
@@ -195,7 +194,7 @@ All voices are created using Qwen3-TTS VoiceDesign, then fine-tuned with 400-500
 The full training pipeline is documented in `docs/training-runbook.md`:
 
 1. **Voice design** — create voice identity via VoiceDesign text prompts
-2. **Data generation** — 500 clips per voice on a cloud GPU (~$0.15/voice)
+2. **Data generation** — 500 clips per voice locally on Mac via mlx-audio
 3. **Enhancement** — DeepFilter noise removal, LUFS normalization, de-essing
 4. **Curation** — manual listening pass
 5. **Training** — lr=1e-7, 2 epochs, text_projection patch, bf16

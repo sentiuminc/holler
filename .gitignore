@@ -20,6 +20,9 @@ __pycache__/
 .build/
 .swiftpm/
 Package.resolved
+/holler
+/mlx-swift_Cmlx.bundle
+*.profraw
 
 # OS
 .DS_Store
