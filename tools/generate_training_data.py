@@ -11,10 +11,13 @@ Outputs to voices/<voice>/training-data/audio-original/ + train.jsonl.
 import argparse
 import time
 import os
+import sys
 import json
 import numpy as np
 import soundfile as sf
 from pathlib import Path
+
+sys.stdout.reconfigure(line_buffering=True)
 
 VOICES_DIR = Path(__file__).parent.parent / "voices"
 
@@ -576,14 +579,82 @@ TEXTS = [
 ]
 
 
+BENCHMARK_TEXTS = TEXTS[:20]
+
+
+def run_benchmark(voice_dir, ref_text):
+    """Run 20 clips and report per-clip timing + summary."""
+    ref_audio = str(voice_dir / "ref.wav")
+    if not Path(ref_audio).exists():
+        print(f"ERROR: {ref_audio} not found.")
+        return
+
+    print("Loading Qwen3-TTS 1.7B Base bf16...")
+    t0 = time.time()
+    from mlx_audio.tts import load
+    model = load("mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16")
+    print(f"Model loaded in {time.time()-t0:.1f}s")
+
+    print("Warmup...")
+    for _ in model.generate(text="Hello.", ref_audio=ref_audio, ref_text=ref_text, language="english", temperature=0.85):
+        pass
+    print("Warmup done.\n")
+
+    timings = []
+    durations = []
+    total_start = time.time()
+
+    for i, text in enumerate(BENCHMARK_TEXTS):
+        print(f"[{i+1}/20] {text[:60]}...")
+        t0 = time.time()
+        chunks = []
+        for result in model.generate(
+            text=text, ref_audio=ref_audio, ref_text=ref_text,
+            language="english", temperature=0.85,
+        ):
+            audio = np.array(result.audio, dtype=np.float32)
+            if audio.ndim > 1:
+                audio = audio.squeeze()
+            chunks.append(audio)
+
+        full_audio = np.concatenate(chunks)
+        elapsed_ms = (time.time() - t0) * 1000
+        dur = len(full_audio) / 24000
+        rtf = elapsed_ms / 1000 / dur if dur > 0 else 0
+        timings.append(elapsed_ms)
+        durations.append(dur)
+        print(f"  {elapsed_ms:.0f}ms | {dur:.1f}s audio | RTF {rtf:.2f}")
+
+    total_elapsed = time.time() - total_start
+    total_audio = sum(durations)
+    overall_rtf = total_elapsed / total_audio if total_audio > 0 else 0
+
+    print(f"\n{'='*60}")
+    print(f"BENCHMARK RESULTS (20 clips)")
+    print(f"{'='*60}")
+    print(f"Total wall time:  {total_elapsed:.1f}s ({total_elapsed/60:.1f}min)")
+    print(f"Total audio:      {total_audio:.1f}s ({total_audio/60:.1f}min)")
+    print(f"Overall RTF:      {overall_rtf:.2f}")
+    print(f"Avg per clip:     {sum(timings)/len(timings):.0f}ms")
+    print(f"Min per clip:     {min(timings):.0f}ms")
+    print(f"Max per clip:     {max(timings):.0f}ms")
+    print(f"Projected 500:    {total_elapsed/20*500/3600:.1f}h")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate training data for a voice")
     parser.add_argument("--voice", required=True, help="Voice name (directory under voices/)")
     parser.add_argument("--ref-text", required=True, help="Transcript of ref.wav")
     parser.add_argument("--start", type=int, default=0, help="Resume from this clip index (0-based)")
+    parser.add_argument("--benchmark", action="store_true", help="Run 20-clip benchmark only, no file output")
     args = parser.parse_args()
 
     voice_dir = VOICES_DIR / args.voice
+
+    if args.benchmark:
+        run_benchmark(voice_dir, args.ref_text)
+        return
+
     training_dir = voice_dir / "training-data"
     ref_audio = str(voice_dir / "ref.wav")
     out_dir = training_dir / "audio-original"
