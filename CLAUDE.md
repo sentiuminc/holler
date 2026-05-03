@@ -24,11 +24,12 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
 - **Kit + Dakota (current):** 2-voice checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good.
 - **Voices confirmed for Holler v1:** Kit (Prism), Dakota (Trail Guide), plus 8 more TBD from 22 curated candidates.
-- **Training data generated locally:** `tools/generate_training_data.py` using `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac.
+- **Training data generated locally:** `tools/generate_training_data.py` (v1, generic texts) and `tools/generate_training_data_quotes.py` (v2, curated quotes from Elon Musk, Steve Jobs, Thompson, Hamming, DFW). Both use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac. Use quotes version for new voices.
 - **Quantization:** 6-bit affine g64 is the pick.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
 - **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
-- **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py`. `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
+- **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py` (tinder UI). `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
+- **Alternative: real speech datasets.** For accented voices (VoiceDesign can't produce accents), VCTK dataset has 110 speakers with accent metadata, studio 48kHz, CC-BY-4.0. Download individual speakers, skip the generate+enhance+curate pipeline entirely. Not yet tested for training.
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
 
 ## Structure
@@ -68,8 +69,12 @@ holler/
 │   │   └── training-data/ — 452 curated clips
 │   ├── nora/              — Female voice (VoiceDesign, slot 3002)
 │   │   └── training-data/ — 500 clips, manual curation in progress
-│   └── joe/               — Male voice (VoiceDesign, slot 3003)
-│       └── training-data/ — 500 clips, needs manual tinder pass
+│   ├── joe/               — Male voice (VoiceDesign, slot 3003)
+│   │   └── training-data/ — 500 clips, manual curation in progress
+│   ├── oliver/            — Male voice (VoiceDesign, slot 3004)
+│   │   └── training-data/ — 500 clips, manually curated ✅
+│   └── tessa/             — Female voice (VoiceDesign, slot 3005)
+│       └── training-data/ — 520 clips (quotes v2), needs enhance + curate
 ├── checkpoints/           — Model checkpoints (not in git — large)
 │   ├── katie-v6/          — 1.7GB bf16 (dev voice, not shipping)
 │   ├── nora-joe-v1/       — 2.3GB bf16, multi-voice (reference for training quality)
