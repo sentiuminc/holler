@@ -29,7 +29,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
 - **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
 - **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py` (tinder UI). `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
-- **Alternative: real speech datasets.** For accented voices (VoiceDesign can't produce accents), VCTK dataset has 110 speakers with accent metadata, studio 48kHz, CC-BY-4.0. Download individual speakers, skip the generate+enhance+curate pipeline entirely. Not yet tested for training.
+- **Alternative: real speech datasets.** VCTK dataset was tested — speech is slow, boring, and not usable quality for our purposes despite being "studio" recorded. Not a viable source. For real-voice training, podcast/YouTube clips with natural energetic speech are the better approach.
 - **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
 
 ## Structure

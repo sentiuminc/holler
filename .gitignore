@@ -24,5 +24,9 @@ Package.resolved
 /mlx-swift_Cmlx.bundle
 *.profraw
 
+docs/clone_realvoice.md
+tools/gemini_guest_extract.py
+tools/extract_guest_clips.py
+
 # OS
 .DS_Store
