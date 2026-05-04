@@ -127,7 +127,10 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     wavs = sorted(f for f in in_dir.iterdir() if f.suffix == ".wav")
-    print(f"Enhancing {len(wavs)} clips: trim → LUFS({args.lufs}) K-weighted → notch({args.notch_freq}Hz Q={args.notch_q})")
+    stages = f"trim → LUFS({args.lufs}) K-weighted"
+    if not args.skip_notch:
+        stages += f" → notch({args.notch_freq}Hz Q={args.notch_q})"
+    print(f"Enhancing {len(wavs)} clips: {stages}")
 
     for i, wav in enumerate(wavs):
         data, sr = sf.read(str(wav))

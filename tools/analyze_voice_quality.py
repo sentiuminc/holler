@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
-"""Comprehensive voice quality analysis for TTS training data and outputs.
+"""Voice quality analysis for TTS training data. Single script for all analysis needs.
 
-Measures everything that influences voice quality:
+Accepts a directory, single file, or multiple files:
+  python analyze_voice_quality.py --source voices/tessa/training-data/audio --label "Tessa" --n 80
+  python analyze_voice_quality.py --source clip_0470.wav clip_0476.wav --label "two clips"
+  python analyze_voice_quality.py --source clip_0470.wav  # single file
+
+Compare mode (--compare): A/B analysis between original and processed clips:
+  python analyze_voice_quality.py --compare --original voices/kit/training-data/audio-original --processed voices/kit/training-data/audio --label "Kit" --n 50
+
+Metrics measured:
 - Levels: peak dBFS, RMS dBFS, crest factor, LUFS (integrated)
+- Noise: noise floor dB, SNR dB
 - Spectrum: centroid, harshness (2-4k), sibilance (4-10k), presence (1-5k),
   spectral tilt (dB/oct), spectral flatness, rolloff
 - Voice quality: F0 (pitch mean/std/range), jitter %, shimmer %, HNR dB
 - Dynamics: silence ratio, dynamic range
-- Noise: DNSMOS (SIG/BAK/OVRL — no-reference perceptual quality)
+- Perceptual: DNSMOS P.835 (SIG/BAK/OVRL)
 
-Compare mode (--compare): A/B analysis between original and processed clips.
-Measures processing artifacts that single-source analysis can't detect:
-- Chirp score: spectral flux delta in 4-10kHz (STFT reconstruction artifacts)
-- Plosive harshness: transient burst energy in 3-6kHz relative to sustained speech
-- Artifact ratio: energy in the difference signal by frequency band
-- De-essing effectiveness: sibilance reduction without clarity loss
-
-Usage:
-  python analyze_voice_quality.py --source ~/Downloads/qwen3-builtin-voices --label "CustomVoice"
-  python analyze_voice_quality.py --source voices/katie/training-data/audio --label "Katie train" --n 80
-  python analyze_voice_quality.py --compare --original voices/kit/training-data/audio-original --processed voices/kit/training-data/audio --label "Kit current" --n 50
-  python analyze_voice_quality.py --compare --original voices/kit/training-data/audio-original --processed ~/Downloads/kit-new-pipeline --match-suffix "_3_new" --original-suffix "_1_original" --label "Kit new pipeline"
+Prints summary stats + worst outliers per category. Use --json for per-clip data.
 """
 import argparse
 import numpy as np
@@ -146,7 +144,14 @@ def analyze_clip(path):
     frames_audio = [audio[i:i+frame_len] for i in range(0, n - frame_len, hop)]
     frame_rms = np.array([np.sqrt(np.mean(f**2)) for f in frames_audio])
     frame_db = 20 * np.log10(frame_rms + 1e-10)
-    silence_ratio = np.mean(frame_db < -40)
+    silence_threshold = -40
+    silence_ratio = np.mean(frame_db < silence_threshold)
+
+    noise_frames = frame_db[frame_db < silence_threshold]
+    noise_floor_db = float(np.median(noise_frames)) if len(noise_frames) > 5 else -80.0
+
+    signal_frames = frame_db[frame_db >= silence_threshold]
+    snr_db = float(np.median(signal_frames)) - noise_floor_db if len(signal_frames) > 0 else 0.0
 
     # Dynamic range: difference between 95th percentile and 5th percentile of frame levels
     if len(frame_db) > 10:
@@ -228,6 +233,9 @@ def analyze_clip(path):
         'rolloff_hz': round(float(rolloff)),
         'tilt_db_oct': round(float(spectral_tilt), 2),
         'flatness': round(float(spectral_flatness), 4),
+        # Noise
+        'noise_floor_db': round(noise_floor_db, 1),
+        'snr_db': round(snr_db, 1),
         # Dynamics
         'silence': round(silence_ratio, 3),
         'dyn_range_db': round(dynamic_range, 1),
@@ -534,6 +542,10 @@ METRIC_GROUPS = [
         ('flatness', 'Flatness', '.4f'),
         ('rolloff_hz', 'Rolloff Hz', '.0f'),
     ]),
+    ("NOISE", [
+        ('noise_floor_db', 'Noise floor dB', '.1f'),
+        ('snr_db', 'SNR dB', '.1f'),
+    ]),
     ("DYNAMICS", [
         ('silence', 'Silence ratio', '.3f'),
         ('dyn_range_db', 'Dyn range dB', '.1f'),
@@ -558,6 +570,40 @@ METRIC_GROUPS = [
 ]
 
 
+def print_outliers(results):
+    if len(results) < 5:
+        return
+
+    print(f"\n  --- WORST OUTLIERS ---")
+
+    worst_snr = sorted(results, key=lambda r: r['snr_db'])[:5]
+    print(f"\n  Lowest SNR (noisiest):")
+    for r in worst_snr:
+        print(f"    {r['file']:<20} SNR {r['snr_db']:.1f} dB, noise floor {r['noise_floor_db']:.1f} dB")
+
+    most_harsh = sorted(results, key=lambda r: r['harsh_2_4k'], reverse=True)[:5]
+    print(f"\n  Highest harshness (2-4kHz):")
+    for r in most_harsh:
+        print(f"    {r['file']:<20} {r['harsh_2_4k']*100:.1f}% of energy in 2-4kHz")
+
+    most_sibilant = sorted(results, key=lambda r: r['sib_4_10k'], reverse=True)[:5]
+    print(f"\n  Highest sibilance (4-10kHz):")
+    for r in most_sibilant:
+        print(f"    {r['file']:<20} {r['sib_4_10k']*100:.1f}% of energy in 4-10kHz")
+
+    worst_ovrl = [r for r in results if r['dnsmos_ovrl'] is not None]
+    if worst_ovrl:
+        worst_ovrl = sorted(worst_ovrl, key=lambda r: r['dnsmos_ovrl'])[:5]
+        print(f"\n  Lowest DNSMOS OVRL:")
+        for r in worst_ovrl:
+            print(f"    {r['file']:<20} OVRL {r['dnsmos_ovrl']:.2f}, SIG {r['dnsmos_sig']:.2f}, BAK {r['dnsmos_bak']:.2f}")
+
+    worst_hnr = sorted(results, key=lambda r: r['hnr_db'])[:5]
+    print(f"\n  Lowest HNR (roughest):")
+    for r in worst_hnr:
+        print(f"    {r['file']:<20} HNR {r['hnr_db']:.1f} dB")
+
+
 def print_summary(results, label):
     print(f"\n{'='*85}")
     print(f"  {label}  ({len(results)} clips)")
@@ -568,16 +614,18 @@ def print_summary(results, label):
         print(f"  {'Metric':<18} {'Mean':>10} {'Median':>10} {'Min':>10} {'Max':>10} {'StdDev':>10}")
         print(f"  {'-'*68}")
         for key, name, fmt in metrics:
-            vals = [r[key] for r in results if r[key] is not None and (r[key] != 0.0 or key in ('peak_db', 'rms_db', 'tilt_db_oct', 'lufs'))]
+            vals = [r[key] for r in results if r[key] is not None and (r[key] != 0.0 or key in ('peak_db', 'rms_db', 'tilt_db_oct', 'lufs', 'noise_floor_db', 'snr_db'))]
             if not vals:
                 print(f"  {name:<18} {'n/a':>10}")
                 continue
             print(f"  {name:<18} {np.mean(vals):>10{fmt}} {np.median(vals):>10{fmt}} {np.min(vals):>10{fmt}} {np.max(vals):>10{fmt}} {np.std(vals):>10{fmt}}")
 
+    print_outliers(results)
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", default=None, help="Directory of WAV files (single-source mode)")
+    parser.add_argument("--source", nargs='+', default=None, help="WAV file(s) or directory (single-source mode)")
     parser.add_argument("--label", default=None, help="Label for this analysis")
     parser.add_argument("--n", type=int, default=None, help="Sample N clips evenly")
     parser.add_argument("--json", default=None, help="Save raw results to JSON")
@@ -666,23 +714,31 @@ def main():
             print("Single-source mode requires --source")
             return
 
-        source = Path(args.source)
-        label = args.label or source.name
+        sources = [Path(s) for s in args.source]
+        wavs = []
+        for src in sources:
+            if not src.exists():
+                print(f"Error: {src} not found")
+                return
+            if src.is_file() and src.suffix == '.wav':
+                wavs.append(src)
+            elif src.is_dir():
+                wavs.extend(sorted(f for f in src.iterdir() if f.suffix == '.wav'))
+            else:
+                print(f"Error: {src} is not a .wav file or directory")
+                return
 
-        if not source.exists():
-            print(f"Error: {source} not found")
-            return
-
-        wavs = sorted(f for f in source.iterdir() if f.suffix == '.wav')
         if not wavs:
-            print(f"No WAV files in {source}")
+            print("No WAV files found")
             return
+
+        label = args.label or (sources[0].name if len(sources) == 1 else f"{len(wavs)} files")
 
         if args.n and args.n < len(wavs):
             indices = np.linspace(0, len(wavs) - 1, args.n, dtype=int)
             wavs = [wavs[i] for i in indices]
 
-        print(f"\nAnalyzing {len(wavs)} clips from {source}...")
+        print(f"\nAnalyzing {len(wavs)} clip(s)...")
 
         results = []
         for i, path in enumerate(wavs):
