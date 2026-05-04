@@ -34,8 +34,7 @@ $PIP install -q -U qwen-tts huggingface_hub safetensors
 $PIP install -q wheel setuptools
 
 echo "=== Installing flash-attn 2.7.3 (takes a few minutes) ==="
-MAX_JOBS=4 $PIP install -q flash-attn==2.7.3 --no-build-isolation --no-cache-dir \
-  || echo "  ⚠ flash-attn build failed; training will fall back to sdpa"
+MAX_JOBS=4 $PIP install -q flash-attn==2.7.3 --no-build-isolation --no-cache-dir
 
 # ── Models ────────────────────────────────────────────────────────────
 cd /workspace
@@ -61,7 +60,33 @@ echo start_server | nvidia-cuda-mps-control 2>/dev/null \
   || echo "  ⚠ CUDA MPS not available — multi-process will time-slice"
 
 # ── Directories ───────────────────────────────────────────────────────
-mkdir -p training-data voices output
+mkdir -p training-data output
+
+# ── Training data from R2 ────────────────────────────────────────────
+echo "=== Installing rclone ==="
+apt-get install -y -qq unzip
+curl -sSL https://rclone.org/install.sh | bash
+
+mkdir -p ~/.config/rclone
+cat > ~/.config/rclone/rclone.conf <<'CONF'
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = f68cf84e6c900eb1b454394e421ae10c
+secret_access_key = 71962ee2d2f4191352e5135114c014a1019d63b9b7fcea5c2ea0b4e070299438
+endpoint = https://bc32378f7dcfe01a255b7a152f9c2319.r2.cloudflarestorage.com
+no_check_bucket = true
+CONF
+
+echo "=== Downloading training data from R2 ==="
+rclone copy r2:holler/training-data/ training-data/ --transfers 32 --stats 5s --stats-one-line 2>&1
+
+echo "  Verifying..."
+for voice in kit dakota nora joe oliver tessa; do
+  n=$(ls training-data/$voice/audio/*.wav 2>/dev/null | wc -l)
+  echo "  $voice: $n clips, ref=$([ -f training-data/$voice/ref.wav ] && echo 'YES' || echo 'NO')"
+done
+echo "  JSONL: $(wc -l < training-data/train_multivoice.jsonl) entries"
 
 # ── Status ────────────────────────────────────────────────────────────
 echo
@@ -76,8 +101,7 @@ echo "Torch:   $($PY -c 'import torch; print(torch.__version__)')"
 echo "CUDA:    $($PY -c 'import torch; print(torch.version.cuda)')"
 echo
 echo "Next steps:"
-echo "  1. Upload training data:  scp -r voices/<name>/training-data root@\$(hostname):/workspace/training-data/<name>/"
-echo "  2. Upload training scripts: scp training/sft_12hz_multivoice.py root@\$(hostname):/workspace/"
-echo "  3. Train:                 bash /workspace/remote_train_multivoice.sh"
-echo "  4. Download checkpoint:   scp -r root@\$(hostname):/workspace/checkpoints/ ~/Downloads/"
+echo "  1. Upload training script: scp training/sft_12hz_multivoice.py root@\$(hostname):/workspace/"
+echo "  2. Train:                  bash /workspace/remote_train_multivoice.sh kit:3000 dakota:3001 nora:3002 joe:3003 oliver:3004 tessa:3005"
+echo "  3. Download checkpoint:    rsync -avz root@\$(hostname):/workspace/output/ ~/Downloads/holler-6voice/"
 echo

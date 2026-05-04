@@ -99,12 +99,16 @@ Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 fo
 
 ### 1b. Prepare Reference Audio
 
-Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to -18 LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
+Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to match training clip LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
-**⚠️ CRITICAL: Verify ref audio is at -18 LUFS before training.** The model learns loudness from the ref embedding. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — a 6.8 dB gap. Result: Joe too loud, Nora too quiet at inference, even though training clips were both normalized. The ref embedding carries loudness information the training data can't override.
+**⚠️ CRITICAL: Ref LUFS must match training clip LUFS.** The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Mismatched ref/clip levels cause output loudness issues. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — 6.8 dB gap → Joe too loud, Nora too quiet.
+
+**⚠️ LUFS level affects 6-bit quantization quality (2026-05-04).** Training 6 voices with refs at -18 LUFS produced embeddings that sounded great at bf16 but degraded at 6-bit. The old 2-voice trained with natural refs at -21/-23 RMS sounded great at 6-bit. Hypothesis: hotter refs → embeddings encode "be louder" → quantized transformer can't reproduce cleanly. Currently testing -20 LUFS. If output is too quiet, apply fixed gain at inference (just a PCM multiply).
+
+**Current LUFS target: -20** (was -18, changed 2026-05-04). Both refs and training clips must be at the same level.
 
 ```bash
-# Quick check — all refs should be close to -18 RMS
+# Quick check — all refs should be close to -20 RMS
 .venv-enhance-audio/bin/python -c "
 import soundfile as sf; import numpy as np
 data, sr = sf.read('voices/<name>/ref.wav')
@@ -134,7 +138,7 @@ Uses `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (NOT 8-bit) via mlx-audio. Ou
 .venv-enhance-audio/bin/python tools/enhance_clips.py --voice <name> --gender <male|female>
 ```
 
-Pipeline: Trim silence → DeepFilterNet3 → LUFS normalize (-18 LUFS) → Spectral de-ess → Dynamic presence.
+Pipeline: Trim silence → DeepFilterNet3 → LUFS normalize (-20 LUFS, was -18) → Spectral de-ess → Dynamic presence.
 
 Gender affects de-esser band (male: 4500-7000Hz, female: 6000-9000Hz).
 
@@ -281,36 +285,28 @@ Setup installs: torch 2.6, qwen-tts, flash-attn 2.7.3, sox, bmon/nvtop/htop. Dow
 
 **HuggingFace CLI:** Use `hf download` (not the deprecated `huggingface-cli download` or `python -m huggingface_hub.commands.hf_cli`). The `hf` binary is at `$VENV/bin/hf` after installing `huggingface_hub`.
 
-### Step 2: Upload Training Data
+### Step 2: Training Data
 
-**Single-voice:**
+Training data lives on R2 at `holler-data.sentium.one`. The setup script (`remote_setup.sh`) pulls it automatically via rclone.
+
+**To update R2 data locally:**
 ```bash
-ssh root@<HOST> "mkdir -p /workspace/training-data"
-rsync -avz -e "ssh -i ~/.ssh/runpod -p <PORT>" voices/<voice>/training-data/audio/ root@<HOST>:/workspace/training-data/audio/
-scp -P <PORT> voices/<voice>/training-data/ref.wav root@<HOST>:/workspace/training-data/
-scp -P <PORT> voices/<voice>/training-data/train_curated.jsonl root@<HOST>:/workspace/training-data/
-scp -P <PORT> training/sft_12hz.py root@<HOST>:/workspace/
-```
+# Build combined JSONL
+python training/build_combined_jsonl.py --voices kit dakota nora joe oliver tessa
 
-**Multi-voice:**
-
-First, build the combined JSONL locally:
-```bash
-python training/build_combined_jsonl.py --voices kit dakota nora joe
-```
-
-Then upload everything:
-```bash
-# Upload per-voice training data
-for voice in kit dakota nora joe; do
-  ssh root@<HOST> "mkdir -p /workspace/training-data/$voice/audio"
-  rsync -avz voices/$voice/training-data/audio/ root@<HOST>:/workspace/training-data/$voice/audio/
-  scp voices/$voice/training-data/ref.wav root@<HOST>:/workspace/training-data/$voice/
+# Upload to R2 (rclone remote 'r2-sentium' must be configured)
+for voice in kit dakota nora joe oliver tessa; do
+  rclone copy "voices/$voice/training-data/audio/" "r2-sentium:holler/training-data/$voice/audio/" --transfers 16
+  rclone copyto "voices/$voice/training-data/ref.wav" "r2-sentium:holler/training-data/$voice/ref.wav"
 done
+rclone copyto training/train_multivoice.jsonl r2-sentium:holler/training-data/train_multivoice.jsonl
+```
 
-# Upload combined JSONL + training script
-scp training/train_multivoice.jsonl root@<HOST>:/workspace/training-data/
-scp training/sft_12hz_multivoice.py root@<HOST>:/workspace/
+**⚠️ Upload refs from `training-data/ref.wav`, NOT from `voices/<name>/ref.wav` (root).** The root refs may not be normalized. The training-data refs are the prepared ones. This was a bug in the first 6-voice train (2026-05-04).
+
+**Still need to SCP the training script:**
+```bash
+scp -i ~/.ssh/runpod -P <PORT> training/sft_12hz_multivoice.py root@<HOST>:/workspace/
 ```
 
 ### Step 3: Train

@@ -18,15 +18,16 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-04-30)
+## Current State (2026-05-04)
 
-- **Recipe:** Proven. lr=1e-7, 2 epochs, text_projection patch only. Now with `--save_every_steps` for fractional epoch checkpoints.
+- **Recipe:** Proven. lr=1e-7, 2 epochs, full-model SFT. Now with `--save_every_steps` for fractional epoch checkpoints.
 - **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
-- **Kit + Dakota (current):** 2-voice checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good.
-- **Voices confirmed for Holler v1:** Kit (Prism), Dakota (Trail Guide), plus 8 more TBD from 22 curated candidates.
-- **Training data generated locally:** `tools/generate_training_data.py` (v1, generic texts) and `tools/generate_training_data_quotes.py` (v2, curated quotes from Elon Musk, Steve Jobs, Thompson, Hamming, DFW). Both use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac. Use quotes version for new voices.
-- **Quantization:** 6-bit affine g64 is the pick.
-- **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit.
+- **Kit + Dakota (reference):** 2-voice 6-bit checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good — this is the quality bar.
+- **6-voice (in progress):** Kit, Dakota, Nora, Joe, Oliver, Tessa. Slots 3000-3005. bf16 checkpoint at `checkpoints/holler-6voice/` sounds great. 6-bit at `checkpoints/holler-6voice-6bit/` has quality degradation — see "LUFS & Quantization" below. **Needs retrain at -20 LUFS.**
+- **Training data on R2:** `holler-data.sentium.one` — all 6 voices' audio clips + refs + combined JSONL. Public bucket. Currently at **-20 LUFS** (re-normalized 2026-05-04). rclone remote `r2-sentium` configured locally.
+- **Training data generated locally:** `tools/generate_training_data.py` (v1, generic texts) and `tools/generate_training_data_quotes.py` (v2, curated quotes). Both use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac. Use quotes version for new voices.
+- **Quantization:** 6-bit affine g64 is the target. See "LUFS & Quantization" for current quality issue.
+- **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit (2-voice). 6-voice 6-bit: RTF 0.69, TTFA 265ms. bf16: RTF 1.07 (too slow for real-time).
 - **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
 - **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py` (tinder UI). `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
 - **Alternative: real speech datasets.** VCTK dataset was tested — speech is slow, boring, and not usable quality for our purposes despite being "studio" recorded. Not a viable source. For real-voice training, podcast/YouTube clips with natural energetic speech are the better approach.
@@ -228,6 +229,25 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
+## LUFS & Quantization Findings (2026-05-04)
+
+**Problem:** 6-voice model sounds great at bf16 but degrades at 6-bit. Old 2-voice 6-bit sounds great.
+
+**Root cause: voice embeddings, not quantization.** The quantized transformer weights are byte-identical between 2v and 6v (882/900 layers). Training at lr=1e-7 moves weights by ~0.00004 — smaller than one 6-bit quantization step, so they round to the same values. The only differences are in the 18 bf16 layers (codec_embedding voice slots, text_embedding, code_predictor embeddings).
+
+**Proof:** Swapped old 2v kit/dakota embeddings into the 6v 6-bit model → output matched 2v quality exactly. The embeddings drive the quality difference, not the quantization.
+
+**Why the embeddings differ:** The 6-voice training used refs normalized to -18 LUFS. The old 2-voice training used natural refs at -21/-23 RMS. The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Hotter refs → embedding encodes "be louder" → the quantized transformer can't reproduce it as cleanly.
+
+**Hypothesis:** The -18 LUFS normalization caused the embedding quality difference. Unproven — could also be joint training dynamics, embedding crowding in adjacent slots, or something else. Testing -20 LUFS next as one variable to eliminate.
+
+**Current state:** Re-normalized all training clips and refs to -20 LUFS. Data is on R2. Needs retrain. Plan to add fixed per-voice gain in inference server to boost output to listening level.
+
+**Key numbers:**
+- bf16: RTF 1.07, TTFA 503ms, 2378MB Metal RAM — too slow
+- 6-bit: RTF 0.69, TTFA 265ms, 1744MB Metal RAM — fast enough
+- Size: bf16 2.3GB, 6-bit 1.7GB on disk
+
 ## Voice Data Pipeline & Training
 
 **All in `docs/training-runbook.md`.** Covers voice design, data generation (local), enhancement, curation, GPU training, quantization, and all environment gotchas. Read it fully before any training work.
@@ -242,7 +262,7 @@ Quick reference tools:
 .venv-enhance-audio/bin/python tools/curate_clips.py --voice <name>
 ```
 
-**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS (-18 LUFS, voice assistant loudness) → IIR notch at 5500Hz Q=3.0. `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
+**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS → IIR notch at 5500Hz Q=3.0. **Current LUFS target: -20** (changed from -18 on 2026-05-04, see LUFS findings above). `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
 
 ## Community References
 
@@ -268,40 +288,39 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ## What's NOT Known / Unresolved
 
-- Whether joint training at 30 voices holds up (only tested at 2)
-- Root cause of v7 quality issues (Katie noise, Joe clipping) — see ivi/logs/2026-04-21-qwen3-tts-training-session.md
+- Whether -20 LUFS training resolves the 6-bit quality degradation (hypothesis — retrain pending, not proven)
+- Whether joint training at 30 voices holds up (tested at 2 and 6, 6 has embedding quality issues)
 - Whether sequential training (one voice at a time, cumulative checkpoints) works better than joint
 - Optimal voice count per training run
-- Whether mixed precision (e.g. higher bits for code_predictor, lower for talker) could improve quality at same average bits
+- Whether mixed precision (e.g. higher bits for code_predictor/lm_head, lower for talker) could improve quality
 - Whether trimming leading silence from training data reduces the 220ms codec warmup
 - EOS failure ~2-4% of the time (model-level, both 12cb and 16cb) — mitigated by safety cap but not eliminated
 - Server crashes during long idle — needs process supervisor for production
 
 ## What's Next
 
-1. ~~**Wire Katie v6 into ivi**~~ — ✅ DONE.
-2. ~~**Try alternative quantization**~~ — ✅ DONE. 6-bit affine g64 wins.
-3. ~~**Enhance training audio**~~ — ✅ Pipeline proven.
-4. ~~**Training data generation**~~ — ✅ DONE. Local on Mac via mlx-audio 1.7B-Base-bf16. `tools/generate_training_data.py`.
-5. ~~**Kit + Dakota trained**~~ — ✅ DONE. 2-voice checkpoint sounds good. Dakota manually curated ✅.
+### Immediate (2026-05-05)
+
+1. **Retrain 6-voice at -20 LUFS** — data is on R2, just needs a Vast.ai instance. Run `remote_setup.sh` → `scp sft_12hz_multivoice.py` → `remote_train_multivoice.sh kit:3000 dakota:3001 nora:3002 joe:3003 oliver:3004 tessa:3005`. Download, quantize to 6-bit, compare against old 2-voice quality.
+2. **Add inference gain stage** — if -20 LUFS output is too quiet for listening, add per-voice fixed gain multiplier in `inference/server.py` (just a PCM multiply, zero cost).
+3. **Control test (optional):** retrain just kit+dakota at -20 LUFS to isolate LUFS change from joint training effects.
+
 ### HollerKit (Swift)
 
-6. ~~**Fix decoder stuttering on carryover**~~ — Partially fixed. Root cause: retry cache poisoning (failed attempt's talker cache persisted, desync with decoder from successful retry). Python fix applied in server.py; Swift already had fix. Speech threshold raised 0.007→0.01 to catch rumble. Remaining issue: KV cache degradation on deep carryover (5+ sentences, ~150+ tokens) — needs cache cap or trim.
-7. ~~**Move Package.swift to repo root**~~ — ✅ DONE. SPM-consumable at root.
-8. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE. Public repo created.
-9. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech. Likely detectable by audio characteristics (RMS pattern), could add check + retry.
-10. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early, cutting final phoneme ("wate" not "water"). Rare in practice (~5-10%, hard to reproduce on demand). Investigated 2026-05-02: negative logit bias on EOS token (−3) was implemented but couldn't validate because (a) the codec decoder produces smooth audio even on early EOS (no waveform discontinuity to detect), (b) the server's 20ms fade-out further masks any signal, (c) amplitude-based detection (tail RMS, peak) doesn't separate cuts from natural endings. The only reliable detector would be STT round-trip (generate → transcribe → compare last word to input). Needs more thorough investigation with a method that can actually reproduce the problem reliably before applying a fix.
+4. ~~**Fix decoder stuttering on carryover**~~ — Partially fixed. Root cause: retry cache poisoning. Remaining: KV cache degradation on deep carryover (5+ sentences).
+5. ~~**Move Package.swift to repo root**~~ — ✅ DONE.
+6. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE.
+7. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech.
+8. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early. Needs STT round-trip detection method.
 
 ### Voices & Training
 
-11. **Finish Nora curation** — manual tinder pass in progress. Export train_curated.jsonl when done.
-12. **Joe tinder pass** — 500 clips enhanced with enhance_clean.py. Needs manual curation.
-13. ~~**Tinder curation**~~ — ✅ Kit 414/500, Dakota 374/500. Both done.
-14. **Pick remaining 8 voices** — from 22 curated candidates. Generate training data, enhance, curate for each.
-14. **Full 10-voice train** — once all voices curated, single multi-voice training run.
-15. **Explore MLX training** — research shows it's feasible. mlx-audio has the model already; adding `nn.value_and_grad()` could be a 1-day project. Eliminates GPU rental.
+9. ~~**All 6 voices curated**~~ — ✅ Kit 414, Dakota 374, Nora 394, Joe 367, Oliver 360, Tessa 331.
+10. **Pick remaining voices** — from roster in `voices/VOICES.md`. Generate training data, enhance, curate for each.
+11. **Full multi-voice train** — scale to 10+ voices once 6-voice quality is proven at 6-bit.
+12. **Explore MLX training** — eliminates GPU rental. mlx-audio has the model; adding `nn.value_and_grad()` could be a 1-day project.
 
 ### Release
 
-16. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
-17. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.
+13. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
+14. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.
