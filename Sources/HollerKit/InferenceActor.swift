@@ -18,9 +18,18 @@ actor InferenceActor {
     var isLoaded: Bool { model != nil }
 
     func loadModel(repo: String) async throws {
-        let loaded = try await TTS.loadModel(modelRepo: repo)
-        guard let qwen3 = loaded as? Qwen3TTSModel else {
-            throw HollerError.generationFailed("Model is not Qwen3-TTS")
+        let localURL = URL(fileURLWithPath: repo).standardizedFileURL
+        let isLocal = FileManager.default.fileExists(atPath: localURL.path)
+
+        let qwen3: Qwen3TTSModel
+        if isLocal {
+            qwen3 = try await Qwen3TTSModel.fromModelDirectory(localURL)
+        } else {
+            let loaded = try await TTS.loadModel(modelRepo: repo)
+            guard let q = loaded as? Qwen3TTSModel else {
+                throw HollerError.generationFailed("Model is not Qwen3-TTS")
+            }
+            qwen3 = q
         }
         model = qwen3
         sampleRate = qwen3.sampleRate
@@ -200,13 +209,19 @@ actor InferenceActor {
         return (sumSq / Float(samples.count)).squareRoot()
     }
 
-    /// Extract voice names from the HF cache config.json.
+    /// Extract voice names from config.json (local path or HF cache).
     private static func extractVoices(repo: String) -> [String] {
-        let slug = repo.replacingOccurrences(of: "/", with: "_")
-        let cachePath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cache/huggingface/hub/mlx-audio/\(slug)/config.json")
+        let configURL: URL
+        let localURL = URL(fileURLWithPath: repo).standardizedFileURL
+        if FileManager.default.fileExists(atPath: localURL.appendingPathComponent("config.json").path) {
+            configURL = localURL.appendingPathComponent("config.json")
+        } else {
+            let slug = repo.replacingOccurrences(of: "/", with: "_")
+            configURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".cache/huggingface/hub/mlx-audio/\(slug)/config.json")
+        }
 
-        guard let data = try? Data(contentsOf: cachePath),
+        guard let data = try? Data(contentsOf: configURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let talkerConfig = json["talker_config"] as? [String: Any],
               let spkId = talkerConfig["spk_id"] as? [String: Any]

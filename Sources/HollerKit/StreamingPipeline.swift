@@ -1,3 +1,5 @@
+import Foundation
+
 /// Chunk-by-chunk streaming silence pipeline.
 /// Port of `_run_generation()` from server.py, operating on audio chunks
 /// as they arrive from `generateStream()`.
@@ -31,10 +33,29 @@ struct StreamingPipeline {
     mutating func processChunk(_ samples: [Float]) -> [[Float]] {
         guard !aborted, !samples.isEmpty else { return [] }
 
+        let chunks: [[Float]]
         if !speechStarted {
-            return handlePreSpeech(samples)
+            chunks = handlePreSpeech(samples)
         } else {
-            return handlePostSpeech(samples)
+            chunks = handlePostSpeech(samples)
+        }
+
+        return chunks.map { softClip($0) }
+    }
+
+    /// Soft-clip a chunk: samples below knee pass through unchanged,
+    /// samples above knee get smoothly compressed toward 1.0 via tanh.
+    private func softClip(_ samples: [Float]) -> [Float] {
+        let knee = config.softClipKnee
+        let headroom = 1.0 - knee
+        guard headroom > 0 else { return samples }
+
+        return samples.map { sample in
+            let magnitude = abs(sample)
+            guard magnitude > knee else { return sample }
+            let sign: Float = sample >= 0 ? 1 : -1
+            let compressed = knee + headroom * tanh((magnitude - knee) / headroom)
+            return sign * compressed
         }
     }
 
