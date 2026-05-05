@@ -6,9 +6,12 @@ Authoritative doc for training Qwen3-TTS 0.6B custom voices. Covers single-voice
 
 **Model:** `Qwen/Qwen3-TTS-12Hz-0.6B-Base`
 **Method:** Full-model SFT (not LoRA — LoRA doesn't work, see `docs/handover-lora-failure.md`)
-**Hyperparameters:** lr=1e-7, batch_size=2, gradient_accumulation=4, AdamW weight_decay=0.01, bf16 mixed precision
-**Epochs:** 2 (pick best by ear — epoch 1 was the pick for Katie v6). With `--save_every_steps 45` you get fractional checkpoints; sweep 0.6-1.4 epochs to find optimal.
-**Loss:** Stays at ~12-15 throughout. This is correct. Low loss at higher LR = overfitting, not quality.
+**Hyperparameters:**
+- **Single-voice:** lr=1e-7, batch_size=2, gradient_accumulation=4, AdamW weight_decay=0.01, bf16
+- **Multi-voice (6+):** lr=5e-7 with cosine warmup (10% of steps), same batch/accum/optimizer. lr=1e-7 is too low for multi-voice — model can't learn distinct voice patterns.
+**Epochs:** 2 (pick best by ear). With `--save_every_steps 45` you get fractional checkpoints.
+**Loss:** 12-15 at lr=1e-7, 12-14 at lr=5e-7. Low loss at higher LR = overfitting, not quality.
+**⚠️ Cosine scheduler caveat:** `accelerator.prepare(scheduler)` with gradient_accumulation>1 steps the scheduler slower than expected. A "2-epoch cosine" may barely decay. The warmup from zero is the main benefit.
 
 ### Single-Voice
 
@@ -263,13 +266,17 @@ LUFS target and peak ceiling interact differently per voice. Voices with high cr
 
 ### Requirements
 
-- 24GB+ VRAM, CUDA 12.x, bf16 support
-- RTX 3090 (~$0.12-0.16/hr), RTX 4090 (~$0.30/hr), A100 (~$0.50/hr) on Vast.ai
+- **24GB VRAM required.** Training uses ~10GB, but tokenization (`prepare_data.py`) peaks at 23GB. 16GB cards will fail at tokenization.
+- CUDA 12.x, bf16 support
+- RTX 3090 (~$0.12-0.16/hr), RTX 4090 (~$0.30/hr), A100 (~$0.50/hr) on Vast.ai.
 - 80GB disk minimum
 - Docker image: `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`
 - SSH key: `~/.ssh/runpod`
 
 ### Step 1: Rent + Setup
+
+**⚠️ Blacklisted machines (unreliable boot):**
+- mach_id 43503 (host 155125, California) — gets stuck on "verifying checksum" for 5+ min, never boots
 
 ```bash
 vastai search offers 'gpu_name=RTX_3090 num_gpus=1 rentable=true disk_space>=80' -o 'dph_total' --limit 10
@@ -281,9 +288,22 @@ scp -i ~/.ssh/runpod -P <PORT> holler/training/remote_setup.sh root@<HOST>:/work
 ssh -i ~/.ssh/runpod -p <PORT> root@<HOST> "bash /workspace/remote_setup.sh"
 ```
 
-Setup installs: torch 2.6, qwen-tts, flash-attn 2.7.3, sox, bmon/nvtop/htop. Downloads 0.6B-Base (training) + Tokenizer-12Hz. Takes ~5 min.
+Setup pulls cached pip wheels + models from R2 first (`r2:holler/instance-cache/`), so pip installs are local and model downloads are skipped. Then installs remaining deps and pulls training data. Takes ~5-8 min (vs ~15-25 min without cache, depending on region).
 
-**HuggingFace CLI:** Use `hf download` (not the deprecated `huggingface-cli download` or `python -m huggingface_hub.commands.hf_cli`). The `hf` binary is at `$VENV/bin/hf` after installing `huggingface_hub`.
+**R2 dependency cache** (`r2:holler/instance-cache/`):
+- `pip-cache.tar.gz` (~3GB) — all pip wheels (torch, torchaudio, qwen-tts, etc.). Extracted to `/root/.cache/pip/` so `pip install` finds them locally.
+- `models-cache.tar.gz` (~2.5GB) — 0.6B-Base + Tokenizer-12Hz. Extracted to `/workspace/models/`, HF download steps detect existing files and skip.
+
+**Updating the cache:** If you bump torch, flash-attn, or Python versions, rebuild the cache from a fresh instance:
+```bash
+# On the instance after setup completes:
+tar czf /workspace/pip-cache.tar.gz -C /root/.cache pip/
+tar czf /workspace/models-cache.tar.gz -C /workspace models/
+rclone copyto /workspace/pip-cache.tar.gz r2:holler/instance-cache/pip-cache.tar.gz
+rclone copyto /workspace/models-cache.tar.gz r2:holler/instance-cache/models-cache.tar.gz
+```
+
+**Note:** flash-attn builds from source (~3-5 min) even with the pip cache, since the original install used `--no-build-isolation`. The source tarball is cached but compilation still runs. Could cache a pre-built wheel to skip this — see "What's Unknown" section.
 
 ### Step 2: Training Data
 
@@ -327,11 +347,16 @@ Run PyTorch inference on the checkpoint before downloading. Use `inference/test_
 
 ### Step 5: Download + Quantize Locally
 
+Upload checkpoint to R2 from the instance, then pull from R2 to Mac (faster than direct rsync, especially from non-US instances):
 ```bash
-rsync -avz root@<HOST>:/workspace/output/checkpoint-epoch-1/ holler/checkpoints/<name>/
+# On instance: upload to R2
+rclone copy /workspace/output/checkpoint-epoch-1/ r2:holler/checkpoints/<name>/ --transfers 4 -v
 
-# Destroy instance
-vastai destroy instance <ID>
+# On Mac: pull from R2
+rclone copy r2-sentium:holler/checkpoints/<name>/ holler/checkpoints/<name>/ --transfers 8 --progress
+
+# Direct rsync fallback (slow from some regions):
+# rsync -avz root@<HOST>:/workspace/output/checkpoint-epoch-1/ holler/checkpoints/<name>/
 
 # Quantize (6-bit affine g64)
 python3 -c "

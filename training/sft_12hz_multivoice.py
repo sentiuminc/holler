@@ -19,6 +19,7 @@ import shutil
 
 import torch
 from accelerate import Accelerator
+from transformers import get_cosine_schedule_with_warmup
 from dataset import TTSDataset
 from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
 from safetensors.torch import save_file
@@ -68,6 +69,8 @@ def train():
     parser.add_argument("--num_epochs", type=int, default=2)
     parser.add_argument("--voice_slot_map_json", type=str, required=True,
                         help='JSON string mapping voice_name -> slot, e.g. \'{"katie":3000,"joe":3001}\'')
+    parser.add_argument("--speaker_encoder_model", type=str, default=None,
+                        help="Path to model with speaker encoder (e.g. Base) if init model lacks one (e.g. CustomVoice)")
     args = parser.parse_args()
 
     voice_slot_map = json.loads(args.voice_slot_map_json)
@@ -96,12 +99,30 @@ def train():
                                   collate_fn=dataset.collate_fn)
 
     optimizer = AdamW(qwen3tts.model.parameters(), lr=args.lr, weight_decay=0.01)
-    model, optimizer, train_dataloader = accelerator.prepare(
-        qwen3tts.model, optimizer, train_dataloader
+
+    steps_per_epoch = len(train_dataloader)
+    total_training_steps = steps_per_epoch * args.num_epochs
+    warmup_steps = int(total_training_steps * 0.1)
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_training_steps)
+    print(f"LR schedule: cosine, warmup={warmup_steps} steps, total={total_training_steps} steps, peak lr={args.lr}")
+
+    model, optimizer, train_dataloader, scheduler = accelerator.prepare(
+        qwen3tts.model, optimizer, train_dataloader, scheduler
     )
 
     # Dict of voice_name -> first-seen speaker embedding (shape [1, D])
     target_speaker_embeddings = {}
+
+    # If the model lacks a speaker encoder (e.g. CustomVoice), load one from a separate model
+    speaker_encoder_fn = getattr(model, 'speaker_encoder', None)
+    if speaker_encoder_fn is None and args.speaker_encoder_model:
+        print(f"Loading speaker encoder from {args.speaker_encoder_model}")
+        se_model = Qwen3TTSModel.from_pretrained(
+            args.speaker_encoder_model, torch_dtype=torch.bfloat16,
+        )
+        speaker_encoder_fn = se_model.model.speaker_encoder.to(model.device)
+    elif speaker_encoder_fn is None:
+        raise RuntimeError("Model has no speaker_encoder. Pass --speaker_encoder_model pointing to a model that has one (e.g. 0.6B-Base).")
 
     num_epochs = args.num_epochs
     model.train()
@@ -119,7 +140,7 @@ def train():
                 codec_mask = batch["codec_mask"]
                 voice_names = batch["voice_names"]
 
-                speaker_embedding = model.speaker_encoder(
+                speaker_embedding = speaker_encoder_fn(
                     ref_mels.to(model.device).to(model.dtype)
                 ).detach()
 
@@ -172,12 +193,14 @@ def train():
                     accelerator.clip_grad_norm_(model.parameters(), 1.0)
 
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
 
             if step % 10 == 0:
+                current_lr = scheduler.get_last_lr()[0]
                 voices_seen = list(target_speaker_embeddings.keys())
                 accelerator.print(
-                    f"Epoch {epoch} | Step {step} | Loss: {loss.item():.4f} | voices cached: {voices_seen}"
+                    f"Epoch {epoch} | Step {step} | Loss: {loss.item():.4f} | lr: {current_lr:.2e} | voices cached: {voices_seen}"
                 )
 
         # Log embedding norms after first epoch for diagnostics

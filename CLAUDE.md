@@ -18,13 +18,14 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-05-04)
+## Current State (2026-05-05)
 
-- **Recipe:** Proven. lr=1e-7, 2 epochs, full-model SFT. Now with `--save_every_steps` for fractional epoch checkpoints.
-- **Katie:** DEV VOICE ONLY. Not shipping. Was used to develop the pipeline. Checkpoint at `checkpoints/katie-v6/` (bf16).
-- **Kit + Dakota (reference):** 2-voice 6-bit checkpoint at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Sounds good — this is the quality bar.
-- **6-voice (in progress):** Kit, Dakota, Nora, Joe, Oliver, Tessa. Slots 3000-3005. bf16 checkpoint at `checkpoints/holler-6voice/` sounds great. 6-bit at `checkpoints/holler-6voice-6bit/` has quality degradation — see "LUFS & Quantization" below. **Needs retrain at -20 LUFS.**
-- **Training data on R2:** `holler-data.sentium.one` — all 6 voices' audio clips + refs + combined JSONL. Public bucket. Currently at **-20 LUFS** (re-normalized 2026-05-04). rclone remote `r2-sentium` configured locally.
+- **Recipe:** lr=5e-7 with cosine warmup, 2 epochs, full-model SFT. See "Training Recipe" section. Previous lr=1e-7 was too low for 6 voices.
+- **6-voice v1 (CURRENT):** `checkpoints/holler-6voice-v1-6bit/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Quality is good with minimal artifacts. Best 6-voice checkpoint so far. Also on R2 at `r2:holler/checkpoints/holler-base-5e7-cosine-2ep-e1/`.
+- **Katie:** DEV VOICE ONLY. Not shipping. Checkpoint at `checkpoints/katie-v6/` (bf16).
+- **Kit + Dakota (reference):** 2-voice 6-bit at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Still the quality bar for single-voice fidelity.
+- **Training data on R2:** `r2:holler/training-data/` — all 6 voices' audio clips + refs + combined JSONL. Kit/Dakota/Oliver/Tessa at -20 LUFS. Nora/Joe at -22 LUFS (run hotter, need compensation). rclone remote `r2-sentium` configured locally.
+- **R2 instance cache:** `r2:holler/instance-cache/` — pip-cache.tar.gz + models-cache.tar.gz + CustomVoice model. Setup time ~5-8 min (was 15-25 min).
 - **Training data generated locally:** `tools/generate_training_data.py` (v1, generic texts) and `tools/generate_training_data_quotes.py` (v2, curated quotes). Both use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac. Use quotes version for new voices.
 - **Quantization:** 6-bit affine g64 is the target. See "LUFS & Quantization" for current quality issue.
 - **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit (2-voice). 6-voice 6-bit: RTF 0.69, TTFA 265ms. bf16: RTF 1.07 (too slow for real-time).
@@ -102,7 +103,7 @@ holler/
 
 **Read `docs/training-runbook.md` first.** It is the authoritative, complete reference for all training: recipe, multi-voice, GPU runbook, data pipeline, quantization, quality targets, and hard-won lessons. Everything below is a quick summary.
 
-- **Recipe:** lr=1e-7, 2 epochs, batch_size=2, bf16. Loss stays ~12-15 (correct).
+- **Recipe:** lr=5e-7 with cosine warmup, 2 epochs, batch_size=2, bf16. Loss ~12-14. Previous lr=1e-7 was too low for multi-voice (flat prosody, airy). See training-runbook.md for full details and 2026-05-05 learnings.
 - **Single-voice:** `training/sft_12hz.py`
 - **Multi-voice:** `training/sft_12hz_multivoice.py` — per-voice JSONL with `voice_name` field, cached embedding injection (bug fixed 2026-04-27).
 - **Quantization:** 6-bit affine g64 via `mlx_audio.convert`. **Must manually copy `speech_tokenizer/model.safetensors` after** (converter bug).
@@ -299,11 +300,13 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ## What's Next
 
-### Immediate (2026-05-05)
+### Immediate
 
-1. **Retrain 6-voice at -20 LUFS** — data is on R2, just needs a Vast.ai instance. Run `remote_setup.sh` → `scp sft_12hz_multivoice.py` → `remote_train_multivoice.sh kit:3000 dakota:3001 nora:3002 joe:3003 oliver:3004 tessa:3005`. Download, quantize to 6-bit, compare against old 2-voice quality.
-2. **Add inference gain stage** — if -20 LUFS output is too quiet for listening, add per-voice fixed gain multiplier in `inference/server.py` (just a PCM multiply, zero cost).
-3. **Control test (optional):** retrain just kit+dakota at -20 LUFS to isolate LUFS change from joint training effects.
+1. ~~**Retrain 6-voice at -20 LUFS**~~ — ✅ DONE. lr=5e-7 + cosine warmup + 2 epochs. Checkpoint: `holler-6voice-v1-6bit`.
+2. **Reduce remaining artifacts** — try fixing cosine scheduler (account for grad_accum in total_steps), stratified batching, or weight decay tuning.
+3. **Fix Nora's hot output** — try -25 LUFS training data or per-voice inference gain.
+4. **Run proper artifact rate measurement** — 20+ samples per voice on the winning checkpoint.
+5. **Test longer session mode** — multi-paragraph carryover stability.
 
 ### HollerKit (Swift)
 
