@@ -93,6 +93,15 @@ public struct SentenceBuffer: Sendable {
                 }
             }
 
+            // Em dash — treat as sentence break for TTS (long clauses degrade quality)
+            if ch == "\u{2014}" {
+                let beforeDash = String(buffer[buffer.startIndex...i])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if beforeDash.count > 3 {
+                    return i
+                }
+            }
+
             if ch == "\n" {
                 let trimmed = String(buffer[buffer.startIndex...i])
                     .trimmingCharacters(in: .whitespacesAndNewlines)
