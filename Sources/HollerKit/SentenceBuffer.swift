@@ -22,10 +22,15 @@ public struct SentenceBuffer: Sendable {
     }
 
     public mutating func flush() -> String? {
-        let remaining = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        var remaining = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
         buffer = ""
         wordCount = 0
-        return remaining.isEmpty ? nil : remaining
+        guard !remaining.isEmpty else { return nil }
+        // Add terminal punctuation so the model knows the sentence is complete
+        if let last = remaining.last, !last.isPunctuation {
+            remaining.append(".")
+        }
+        return remaining
     }
 
     public var isEmpty: Bool { buffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
