@@ -18,21 +18,17 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-05-05)
+## Current State (2026-05-11)
 
-- **Recipe:** lr=5e-7 with cosine warmup, 2 epochs, full-model SFT. See "Training Recipe" section. Previous lr=1e-7 was too low for 6 voices.
-- **6-voice v1 (CURRENT):** `checkpoints/holler-6voice-v1-6bit/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Quality is good with minimal artifacts. Best 6-voice checkpoint so far. Also on R2 at `r2:holler/checkpoints/holler-base-5e7-cosine-2ep-e1/`.
-- **Katie:** DEV VOICE ONLY. Not shipping. Checkpoint at `checkpoints/katie-v6/` (bf16).
-- **Kit + Dakota (reference):** 2-voice 6-bit at `checkpoints/holler-kit-dakota-6bit/`. Kit=3000, Dakota=3001. Still the quality bar for single-voice fidelity.
-- **Training data on R2:** `r2:holler/training-data/` — all 6 voices' audio clips + refs + combined JSONL. Kit/Dakota/Oliver/Tessa at -20 LUFS. Nora/Joe at -22 LUFS (run hotter, need compensation). rclone remote `r2-sentium` configured locally.
-- **R2 instance cache:** `r2:holler/instance-cache/` — pip-cache.tar.gz + models-cache.tar.gz + CustomVoice model. Setup time ~5-8 min (was 15-25 min).
-- **Training data generated locally:** `tools/generate_training_data.py` (v1, generic texts) and `tools/generate_training_data_quotes.py` (v2, curated quotes). Both use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` via mlx-audio on Mac. Use quotes version for new voices.
-- **Quantization:** 6-bit affine g64 is the target. See "LUFS & Quantization" for current quality issue.
-- **Inference runtime (Python):** Custom fast inference server (`inference/server.py`). RTF 0.38, TTFA 139ms on 6-bit (2-voice). 6-voice 6-bit: RTF 0.69, TTFA 265ms. bf16: RTF 1.07 (too slow for real-time).
-- **Inference runtime (Swift):** HollerKit library at repo root (`Sources/HollerKit/`). Phase 2B complete. RTF 0.49, TTFA 360ms (release build). See "HollerKit (Swift)" section below.
-- **Training data tools:** Pipeline — `tools/enhance_clean.py` (current standard), `tools/analyze_voice_quality.py`, `tools/curate_clips.py` (tinder UI). `enhance_clips.py`, `enhance_voicedesign.py`, and `auto_curate.py` are deprecated (see deprecation headers in each file).
-- **Alternative: real speech datasets.** VCTK dataset was tested — speech is slow, boring, and not usable quality for our purposes despite being "studio" recorded. Not a viable source. For real-voice training, podcast/YouTube clips with natural energetic speech are the better approach.
-- **Python venv:** `.venv` (Python 3.13, torch 2.6, torchaudio 2.6, mlx-audio, clearvoice, deepfilternet, noisereduce, scipy, pyloudnorm).
+- **Recipe:** lr=5e-7, cosine warmup (scheduler fix: `total_steps ÷ grad_accum`), 2 epochs, batch_size=2, grad_accum=4, weight_decay=0.01, **embedding normalization** (L2-norm to 10.0). All training data at uniform -22 LUFS.
+- **6-voice v12 (CURRENT):** `checkpoints/holler-6voice-v12-6bit/` and `holler-6voice-v12-bf16/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Benchmark: 90% clean raw at temp 0.7, every voice 9/10. bf16 sounds significantly better than 6-bit. Also on R2 at `r2:holler/checkpoints/holler-6voice-v12-e1/`.
+- **v5 (backup):** `checkpoints/holler-6voice-v5-6bit/` and `v5-bf16/`. Previous best before embedding normalization. On R2 at `r2:holler/checkpoints/holler-6voice-v5-e1/`.
+- **Training data on R2:** `r2:holler/training-data/` — all 6 voices at **uniform -22 LUFS** (clips + refs). Original long VoiceDesign refs (7-11s). rclone remote `r2-sentium` configured locally.
+- **R2 instance cache:** `r2:holler/instance-cache/` — pip-cache.tar.gz + models-cache.tar.gz. Setup time ~5-8 min.
+- **Quantization:** 6-bit affine g64 for shipping. bf16 for quality. 8-bit untested but promising middle ground. **Must copy entire `speech_tokenizer/` directory** (all config files + model.safetensors) after quantization — reuse canonical copy, never re-download.
+- **Inference:** Temperature 0.7 (not 0.6) for better prosody. Soft clip knee 0.8.
+- **Benchmark tool:** `tools/benchmark_quality.py` — Whisper medium word timestamps, gap analysis, strict WER. `--raw` and `--session` modes, `--temperature` flag, `--compare` for A/B.
+- **Python venv:** `.venv` (Python 3.14, mlx-audio, mlx-whisper) and `.venv-enhance-audio` (Python 3.13, torch 2.6, parselmouth, DNSMOS, pyloudnorm).
 
 ## Structure
 
@@ -103,11 +99,13 @@ holler/
 
 **Read `docs/training-runbook.md` first.** It is the authoritative, complete reference for all training: recipe, multi-voice, GPU runbook, data pipeline, quantization, quality targets, and hard-won lessons. Everything below is a quick summary.
 
-- **Recipe:** lr=5e-7 with cosine warmup, 2 epochs, batch_size=2, bf16. Loss ~12-14. Previous lr=1e-7 was too low for multi-voice (flat prosody, airy). See training-runbook.md for full details and 2026-05-05 learnings.
+- **Recipe:** lr=5e-7, cosine warmup, 2 epochs, batch_size=2, grad_accum=4, weight_decay=0.01, **embedding normalization** (L2-norm to 10.0). All data at uniform -22 LUFS. See training-runbook.md for full details.
+- **Embedding normalization:** L2-normalize all ECAPA-TDNN speaker embeddings to magnitude 10.0 before injection during training. Strips loudness from embeddings while preserving voice identity (direction). Without this, voices with higher embedding norms produce hotter output, and LUFS changes cascade unpredictably through shared weights. 3 lines in `sft_12hz_multivoice.py`.
+- **Cosine scheduler fix:** `total_optimizer_steps = (steps_per_epoch × num_epochs) // grad_accum`. The Accelerator steps the scheduler once per optimizer step (every `grad_accum` batches), so `total_steps` must reflect actual optimizer steps, not dataloader batches. Without this fix, cosine barely decays (completes only 25% of curve).
 - **Single-voice:** `training/sft_12hz.py`
-- **Multi-voice:** `training/sft_12hz_multivoice.py` — per-voice JSONL with `voice_name` field, cached embedding injection (bug fixed 2026-04-27).
-- **Quantization:** 6-bit affine g64 via `mlx_audio.convert`. **Must manually copy `speech_tokenizer/model.safetensors` after** (converter bug).
-- **GPU (training only):** Vast.ai, 3090+ ($0.12-0.50/hr), `remote_setup.sh` + `remote_train_multivoice.sh`.
+- **Multi-voice:** `training/sft_12hz_multivoice.py` — per-voice JSONL with `voice_name` field, cached embedding injection with L2 normalization.
+- **Quantization:** 6-bit affine g64 via `mlx_audio.convert`. **Must copy entire `speech_tokenizer/` directory** (config.json, configuration.json, preprocessor_config.json, model.safetensors) from a canonical source — reuse the same copy across all checkpoints, never re-download. The speech tokenizer is identical across all checkpoints.
+- **GPU (training only):** Vast.ai, 3090+ ($0.12-0.25/hr). **Requires driver ≥550** for CUDA 12.4 Docker image. `remote_setup.sh` + `remote_train_multivoice.sh`. Always SCP the training script fresh — never pull from R2.
 
 ## Inference Architecture (updated 2026-04-24)
 
@@ -230,23 +228,28 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - For ivi integration: sentence-level streaming from LLM overlaps codec warmup with text generation
 - Study `rekuenkdr/Qwen3-TTS-streaming` — two-phase streaming fork that buffers past the silence before first emit (208ms first audible vs 570ms baseline)
 
-## LUFS & Quantization Findings (2026-05-04)
+## LUFS, Embeddings & Training Dynamics (2026-05-11)
 
-**Problem:** 6-voice model sounds great at bf16 but degrades at 6-bit. Old 2-voice 6-bit sounds great.
+**The ECAPA-TDNN speaker encoder bakes loudness into voice embeddings.** Voices with naturally louder refs produce embeddings with higher norms, causing the model to generate hotter output. This effect cascades through shared transformer weights: changing one voice's LUFS destabilizes other voices unpredictably ("whack-a-mole").
 
-**Root cause: voice embeddings, not quantization.** The quantized transformer weights are byte-identical between 2v and 6v (882/900 layers). Training at lr=1e-7 moves weights by ~0.00004 — smaller than one 6-bit quantization step, so they round to the same values. The only differences are in the 18 bf16 layers (codec_embedding voice slots, text_embedding, code_predictor embeddings).
+**Solution: embedding normalization.** L2-normalize all speaker embeddings to magnitude 10.0 before injection during training. This strips loudness information while preserving voice identity (the direction of the embedding vector). Combined with uniform -22 LUFS training data, this produces the most balanced output levels across voices.
 
-**Proof:** Swapped old 2v kit/dakota embeddings into the 6v 6-bit model → output matched 2v quality exactly. The embeddings drive the quality difference, not the quantization.
+**Key findings from 12 training runs (2026-05-11):**
+- Uniform LUFS across all voices is essential — per-voice LUFS adjustments cause unpredictable cross-voice interference
+- Ref audio length correlates with voice stability: 7-11s refs → consistent voice identity, 4-5s refs → variable
+- Ref choice directly affects output levels — different ref from same training data produces different loudness
+- Training is non-deterministic — same data, different run, different result (run-to-run variance)
+- Larger batch size (bs=8) did NOT fix voice merging — embedding normalization did
+- Weight decay 0.05 was too aggressive (killed voice character), 0.01 is the sweet spot
+- 3 epochs overfit, 2 epochs is optimal with the cosine scheduler fix
+- Temperature 0.7 at inference gives better prosody than 0.6 (training data was generated at 0.85)
+- bf16 sounds significantly better than 6-bit — 8-bit quantization untested but promising
 
-**Why the embeddings differ:** The 6-voice training used refs normalized to -18 LUFS. The old 2-voice training used natural refs at -21/-23 RMS. The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Hotter refs → embedding encodes "be louder" → the quantized transformer can't reproduce it as cleanly.
-
-**Hypothesis:** The -18 LUFS normalization caused the embedding quality difference. Unproven — could also be joint training dynamics, embedding crowding in adjacent slots, or something else. Testing -20 LUFS next as one variable to eliminate.
-
-**Current state:** Re-normalized all training clips and refs to -20 LUFS. Data is on R2. Needs retrain. Plan to add fixed per-voice gain in inference server to boost output to listening level.
+**Nora runs ~3 dB hotter than training data** even with embedding normalization. Her voice identity inherently encodes "loud" in the ECAPA-TDNN. Manageable with soft clipping at inference.
 
 **Key numbers:**
-- bf16: RTF 1.07, TTFA 503ms, 2378MB Metal RAM — too slow
-- 6-bit: RTF 0.69, TTFA 265ms, 1744MB Metal RAM — fast enough
+- bf16: RTF 0.67-0.81, 2378MB Metal RAM — real-time, best quality
+- 6-bit: RTF 0.50-0.57, 1744MB Metal RAM — fast, good quality
 - Size: bf16 2.3GB, 6-bit 1.7GB on disk
 
 ## Voice Data Pipeline & Training
@@ -263,7 +266,7 @@ Quick reference tools:
 .venv-enhance-audio/bin/python tools/curate_clips.py --voice <name>
 ```
 
-**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS → IIR notch at 5500Hz Q=3.0. **Current LUFS target: -20** (changed from -18 on 2026-05-04, see LUFS findings above). `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
+**Enhancement pipeline:** `enhance_clean.py` is the current standard for all Holler training data. Pipeline: trim → K-weighted LUFS → IIR notch at 5500Hz Q=3.0. **Current LUFS target: -22** (changed from -20 on 2026-05-11). All voices at uniform LUFS — no per-voice adjustments. `enhance_clips.py` and `enhance_voicedesign.py` are deprecated — see their headers for why.
 
 ## Community References
 
@@ -289,41 +292,36 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ## What's NOT Known / Unresolved
 
-- Whether -20 LUFS training resolves the 6-bit quality degradation (hypothesis — retrain pending, not proven)
-- Whether joint training at 30 voices holds up (tested at 2 and 6, 6 has embedding quality issues)
-- Whether sequential training (one voice at a time, cumulative checkpoints) works better than joint
-- Optimal voice count per training run
-- Whether mixed precision (e.g. higher bits for code_predictor/lm_head, lower for talker) could improve quality
+- Whether 8-bit quantization is a viable middle ground (better quality than 6-bit, smaller than bf16)
+- Whether joint training at 30 voices holds up (tested at 2 and 6)
 - Whether trimming leading silence from training data reduces the 220ms codec warmup
-- EOS failure ~2-4% of the time (model-level, both 12cb and 16cb) — mitigated by safety cap but not eliminated
-- Server crashes during long idle — needs process supervisor for production
+- EOS failure ~2-4% of the time (model-level) — mitigated by safety cap but not eliminated
+- Why Nora consistently runs ~3 dB hot even with embedding normalization — may be inherent to her voice identity
 
 ## What's Next
 
 ### Immediate
 
-1. ~~**Retrain 6-voice at -20 LUFS**~~ — ✅ DONE. lr=5e-7 + cosine warmup + 2 epochs. Checkpoint: `holler-6voice-v1-6bit`.
-2. **Reduce remaining artifacts** — try fixing cosine scheduler (account for grad_accum in total_steps), stratified batching, or weight decay tuning.
-3. **Fix Nora's hot output** — try -25 LUFS training data or per-voice inference gain.
-4. **Run proper artifact rate measurement** — 20+ samples per voice on the winning checkpoint.
-5. **Test longer session mode** — multi-paragraph carryover stability.
+1. ~~**Cosine scheduler fix**~~ — ✅ DONE (v2). `total_steps ÷ grad_accum`.
+2. ~~**Embedding normalization**~~ — ✅ DONE (v11). L2-norm to 10.0.
+3. ~~**Proper benchmark tool**~~ — ✅ DONE. `tools/benchmark_quality.py` with Whisper word timestamps.
+4. ~~**Release-quality 6-voice model**~~ — ✅ DONE. v12 checkpoint.
+5. **Test 8-bit quantization** on v12 — could be the sweet spot between 6-bit speed and bf16 quality.
+6. **Generate more Tessa training data** — 331 clips is the fewest. 500+ would improve consistency.
 
 ### HollerKit (Swift)
 
-4. ~~**Fix decoder stuttering on carryover**~~ — Partially fixed. Root cause: retry cache poisoning. Remaining: KV cache degradation on deep carryover (5+ sentences).
-5. ~~**Move Package.swift to repo root**~~ — ✅ DONE.
-6. ~~**Push holler to sentiuminc/holler**~~ — ✅ DONE.
-7. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech.
-8. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early. Needs STT round-trip detection method.
+7. ~~**Fix decoder stuttering on carryover**~~ — Partially fixed. Remaining: KV cache degradation on deep carryover (5+ sentences).
+8. **Investigate long rumble artifact** — occasional generation produces seconds of low rumble instead of speech.
+9. **Stochastic EOS cutoff** — model hits EOS 1-2 tokens early.
 
 ### Voices & Training
 
-9. ~~**All 6 voices curated**~~ — ✅ Kit 414, Dakota 374, Nora 394, Joe 367, Oliver 360, Tessa 331.
 10. **Pick remaining voices** — from roster in `voices/VOICES.md`. Generate training data, enhance, curate for each.
-11. **Full multi-voice train** — scale to 10+ voices once 6-voice quality is proven at 6-bit.
+11. **Scale to 10+ voices** — embedding normalization should help maintain voice separation at scale.
 12. **Explore MLX training** — eliminates GPU rental. mlx-audio has the model; adding `nn.value_and_grad()` could be a 1-day project.
 
 ### Release
 
-13. **HuggingFace release** under `sentium/` with full docs — bf16 + 6-bit affine only.
+13. **HuggingFace release** under `sentium/` — bf16 + 6-bit (+ 8-bit if it tests well).
 14. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.

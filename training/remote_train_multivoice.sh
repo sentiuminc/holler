@@ -53,14 +53,14 @@ $PY prepare_data.py \
 cp /workspace/sft_12hz_multivoice.py .
 
 echo ""
-echo "=== Multi-voice training (lr=1e-7, 2 epochs) ==="
+echo "=== Multi-voice training (lr=5e-7, cosine warmup, 2 epochs) ==="
 echo "  Voice slots: $SLOT_MAP"
 $PY sft_12hz_multivoice.py \
   --init_model_path /workspace/models/0.6B-Base \
   --output_model_path /workspace/output \
   --train_jsonl /workspace/training-data/train_with_codes.jsonl \
   --batch_size 2 \
-  --lr 1e-7 \
+  --lr 5e-7 \
   --num_epochs 2 \
   --voice_slot_map_json "$SLOT_MAP"
 

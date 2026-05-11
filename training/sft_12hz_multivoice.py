@@ -101,10 +101,15 @@ def train():
     optimizer = AdamW(qwen3tts.model.parameters(), lr=args.lr, weight_decay=0.01)
 
     steps_per_epoch = len(train_dataloader)
-    total_training_steps = steps_per_epoch * args.num_epochs
-    warmup_steps = int(total_training_steps * 0.1)
-    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_training_steps)
-    print(f"LR schedule: cosine, warmup={warmup_steps} steps, total={total_training_steps} steps, peak lr={args.lr}")
+    # accelerator.prepare(scheduler) steps it once per optimizer.step(), which happens
+    # every gradient_accumulation_steps batches. So actual optimizer steps = total_batches / grad_accum.
+    # We must tell the scheduler this smaller number so cosine completes its full curve.
+    grad_accum = 4
+    total_optimizer_steps = (steps_per_epoch * args.num_epochs) // grad_accum
+    warmup_steps = max(1, int(total_optimizer_steps * 0.1))
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_optimizer_steps)
+    print(f"LR schedule: cosine, {total_optimizer_steps} optimizer steps ({warmup_steps} warmup), grad_accum={grad_accum}, peak lr={args.lr}")
+    print(f"  (dataloader: {steps_per_epoch} batches/epoch × {args.num_epochs} epochs = {steps_per_epoch * args.num_epochs} batches → {total_optimizer_steps} optimizer steps)")
 
     model, optimizer, train_dataloader, scheduler = accelerator.prepare(
         qwen3tts.model, optimizer, train_dataloader, scheduler
@@ -144,11 +149,16 @@ def train():
                     ref_mels.to(model.device).to(model.dtype)
                 ).detach()
 
-                # Cache per-voice first-seen embedding (from non-padded batches ideally,
-                # but even padded ones are ok — we only need one good extraction per voice)
+                # Cache per-voice first-seen embedding, L2-normalized to fixed magnitude.
+                # Normalization strips loudness from the embedding while preserving voice
+                # identity (direction). Without this, voices with naturally higher embedding
+                # norms produce hotter output, and LUFS changes cascade unpredictably.
+                TARGET_EMBEDDING_NORM = 10.0
                 for b_idx, vname in enumerate(voice_names):
                     if vname not in target_speaker_embeddings:
-                        target_speaker_embeddings[vname] = speaker_embedding[b_idx:b_idx+1]
+                        emb = speaker_embedding[b_idx:b_idx+1]
+                        emb = emb / emb.norm() * TARGET_EMBEDDING_NORM
+                        target_speaker_embeddings[vname] = emb
 
                 input_text_ids = input_ids[:, :, 0]
                 input_codec_ids = input_ids[:, :, 1]

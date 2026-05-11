@@ -21,7 +21,7 @@ public struct HollerConfiguration: Sendable {
     public var carryoverPauseMaxMs: Int = 250
 
     // Soft limiter — prevents hard clipping on hot model output
-    public var softClipKnee: Float = 0.9
+    public var softClipKnee: Float = 0.8
 
     // Debug logging — set to a closure to enable verbose output.
     // Library never calls print() directly; all debug output goes through this.

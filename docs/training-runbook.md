@@ -9,9 +9,12 @@ Authoritative doc for training Qwen3-TTS 0.6B custom voices. Covers single-voice
 **Hyperparameters:**
 - **Single-voice:** lr=1e-7, batch_size=2, gradient_accumulation=4, AdamW weight_decay=0.01, bf16
 - **Multi-voice (6+):** lr=5e-7 with cosine warmup (10% of steps), same batch/accum/optimizer. lr=1e-7 is too low for multi-voice — model can't learn distinct voice patterns.
-**Epochs:** 2 (pick best by ear). With `--save_every_steps 45` you get fractional checkpoints.
+**Epochs:** 2 (pick best by ear). 3 epochs overfit (tested 2026-05-11). With `--save_every_steps 45` you get fractional checkpoints.
 **Loss:** 12-15 at lr=1e-7, 12-14 at lr=5e-7. Low loss at higher LR = overfitting, not quality.
-**⚠️ Cosine scheduler caveat:** `accelerator.prepare(scheduler)` with gradient_accumulation>1 steps the scheduler slower than expected. A "2-epoch cosine" may barely decay. The warmup from zero is the main benefit.
+**Cosine scheduler (FIXED 2026-05-11):** `total_optimizer_steps = (steps_per_epoch × num_epochs) // grad_accum`. The Accelerator steps the scheduler once per optimizer step (every `grad_accum` batches). Without this fix, the scheduler sees raw batch count and only completes ~25% of its cosine curve — lr barely decays.
+**Embedding normalization (added 2026-05-11):** L2-normalize all ECAPA-TDNN speaker embeddings to magnitude 10.0 before injection. Strips loudness from embeddings while preserving voice identity. Without this, voices with higher embedding norms produce hotter output, and LUFS changes cascade unpredictably through shared weights.
+**LUFS:** All voices at **uniform -22 LUFS** (refs and clips). Do NOT use per-voice LUFS adjustments — they cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Tested extensively 2026-05-11 across 12 training runs.
+**Inference temperature:** 0.7 (not 0.6). Training data was generated at 0.85 — inference at 0.6 flattens prosody. 0.7 is the sweet spot.
 
 ### Single-Voice
 
@@ -104,11 +107,13 @@ Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 fo
 
 Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to match training clip LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
-**⚠️ CRITICAL: Ref LUFS must match training clip LUFS.** The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Mismatched ref/clip levels cause output loudness issues. In nora-joe-v1, Joe's ref was -18.5 dBFS RMS (hot) and Nora's was -25.3 dBFS RMS (quiet) — 6.8 dB gap → Joe too loud, Nora too quiet.
+**⚠️ CRITICAL: All voices at uniform LUFS.** The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Per-voice LUFS adjustments cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Tested extensively 2026-05-11: changing one voice's LUFS by 3 dB shifted other voices' output by up to 5+ dB.
 
-**⚠️ LUFS level affects 6-bit quantization quality (2026-05-04).** Training 6 voices with refs at -18 LUFS produced embeddings that sounded great at bf16 but degraded at 6-bit. The old 2-voice trained with natural refs at -21/-23 RMS sounded great at 6-bit. Hypothesis: hotter refs → embeddings encode "be louder" → quantized transformer can't reproduce cleanly. Currently testing -20 LUFS. If output is too quiet, apply fixed gain at inference (just a PCM multiply).
+**⚠️ Use embedding normalization.** L2-normalize speaker embeddings to magnitude 10.0 before injection during training. This strips the loudness signal from embeddings while preserving voice identity. Without it, some voices (e.g., Nora) consistently produce output 5-9 dB hotter than training data regardless of LUFS adjustments.
 
-**Current LUFS target: -20** (was -18, changed 2026-05-04). Both refs and training clips must be at the same level.
+**⚠️ Ref audio length matters.** Longer refs (7-11s) produce more stable voice identity at inference. Short refs (4-5s) give the ECAPA-TDNN less context → vaguer embedding → variable voice across generations. Use the longest good clip available.
+
+**Current LUFS target: -22** (was -20, changed 2026-05-11). All voices at the same level. Both refs and training clips must match.
 
 ```bash
 # Quick check — all refs should be close to -20 RMS
@@ -198,7 +203,7 @@ Reference: Serena (built-in CustomVoice). Based on ear testing at 90% AirPods Pr
 
 | Metric | Target | Why |
 |--------|--------|-----|
-| Peak dBFS | -4 to -1 | Headroom at -18 LUFS target |
+| Peak dBFS | -4 to -1 | Headroom at -22 LUFS target |
 | LUFS | -20 to -16 | Voice assistant loudness (podcast/Siri level) |
 | Harshness 2-4kHz | < 2% | Predicts ear pain better than volume |
 | Sibilance 4-10kHz | < 3% | Excessive = fatiguing |
@@ -245,11 +250,12 @@ LUFS target and peak ceiling interact differently per voice. Voices with high cr
 
 **Presence:** 3500-8000 Hz range, max boost 2.5 dB, sensitivity 1.0.
 
-**LUFS:** target -18.0, peak ceiling -1.0 dBFS.
+**LUFS:** target -22.0, peak ceiling -1.0 dBFS.
 
 ### Analysis Tools
 
 - `tools/analyze_voice_quality.py` — 20+ metric voice quality analysis (requires `.venv-enhance-audio/`)
+- `tools/benchmark_quality.py` — **Quality benchmark for trained models** (requires `.venv` with mlx-whisper). Uses Whisper medium word timestamps for gap analysis + strict WER. Run after every training run.
 - `tools/noise_profile.py` — before/after noise comparison by frequency band
 - `tools/deess.py` — standalone de-esser (also integrated in enhance_clips.py)
 
@@ -258,6 +264,11 @@ LUFS target and peak ceiling interact differently per voice. Voices with high cr
 .venv-enhance-audio/bin/python tools/analyze_voice_quality.py --source voices/joe/training-data/audio --label "joe-v1" --n 80
 # Export to JSON
 .venv-enhance-audio/bin/python tools/analyze_voice_quality.py --source <dir> --label "name" --n 80 --json output.json
+
+# Benchmark a checkpoint (raw mode = no guardrails, true model quality)
+.venv/bin/python tools/benchmark_quality.py -c checkpoints/<name> --holler-bin ./holler --raw --temperature 0.7 --label <name>
+# Compare two checkpoints
+.venv/bin/python tools/benchmark_quality.py --compare ~/Downloads/holler-bench/v1 ~/Downloads/holler-bench/v2 --compare-labels v1 v2
 ```
 
 **Metrics:** peak_db, rms_db, crest_db, lufs, dc_offset | centroid_hz, harsh_2_4k, sib_4_10k, presence_1_5k, low_80_300, air_10k, tilt_db_oct, flatness, rolloff_hz | silence_ratio, dyn_range_db | f0_mean/std/range, voiced_ratio, jitter_pct, shimmer_pct, hnr_db, f1/f2/f3_hz | dnsmos_sig/bak/ovrl. Uses parselmouth (Praat) for voice quality, torchmetrics for DNSMOS P.835.
@@ -267,7 +278,7 @@ LUFS target and peak ceiling interact differently per voice. Voices with high cr
 ### Requirements
 
 - **24GB VRAM required.** Training uses ~10GB, but tokenization (`prepare_data.py`) peaks at 23GB. 16GB cards will fail at tokenization.
-- CUDA 12.x, bf16 support
+- CUDA 12.x, bf16 support. **NVIDIA driver ≥550 required** for the `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel` Docker image. Driver 535 fails with "forward compatibility not supported on GeForce" (error 804).
 - RTX 3090 (~$0.12-0.16/hr), RTX 4090 (~$0.30/hr), A100 (~$0.50/hr) on Vast.ai.
 - 80GB disk minimum
 - Docker image: `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`
@@ -364,8 +375,11 @@ from mlx_audio.convert import convert
 convert(hf_path='checkpoints/<name>', mlx_path='checkpoints/<name>-6bit', quantize=True, q_bits=6, q_group_size=64, q_mode='affine')
 "
 
-# CRITICAL: copy speech tokenizer weights (mlx_audio.convert bug)
-cp checkpoints/<name>/speech_tokenizer/model.safetensors checkpoints/<name>-6bit/speech_tokenizer/
+# CRITICAL: copy ENTIRE speech_tokenizer directory (mlx_audio.convert bug)
+# The speech tokenizer is identical across ALL checkpoints — reuse a canonical copy.
+mkdir -p checkpoints/<name>-6bit/speech_tokenizer
+cp checkpoints/<canonical>/speech_tokenizer/* checkpoints/<name>-6bit/speech_tokenizer/
+# Files needed: config.json, configuration.json, preprocessor_config.json, model.safetensors
 ```
 
 ### Step 6: Serve
@@ -386,7 +400,7 @@ from mlx_audio.convert import convert
 convert(hf_path='<bf16_path>', mlx_path='<output_path>', quantize=True, q_bits=6, q_group_size=64, q_mode='affine')
 ```
 
-**CRITICAL BUG:** `mlx_audio.convert()` does NOT copy `speech_tokenizer/model.safetensors` (682MB codec decoder weights). Without it, model generates correct codec tokens but decodes to silence (peak 0.001). Always manually copy after quantization.
+**CRITICAL BUG:** `mlx_audio.convert()` does NOT copy the `speech_tokenizer/` directory (682MB codec decoder + config files). Without it, model either decodes to silence or crashes with "Speech tokenizer not loaded". Always copy the **entire directory** (model.safetensors + config.json + configuration.json + preprocessor_config.json) from a canonical source after quantization. The speech tokenizer is identical across all checkpoints — reuse the same copy, never re-download. Also copy it into bf16 checkpoints downloaded from R2 (which exclude speech_tokenizer to save bandwidth).
 
 | Variant | Disk | Bits/wt | Notes |
 |---------|------|---------|-------|

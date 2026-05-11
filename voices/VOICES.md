@@ -95,13 +95,16 @@ voices — less polished than the assistant text, more human.
 
 ---
 
-## Slot Assignments
+## Slot Assignments (v12, 2026-05-11)
 
-- Katie — slot 3000 (Cartesia-sourced, trained, production-ready)
-- Joe — slot 3001 (VoiceDesign-sourced, trained, quality issues in multi-voice)
-- Joseph — slot 3002 (VoiceDesign-sourced, designed, not yet trained) — deep bass, authoritative patriarch
+- Kit — slot 3000 (VoiceDesign, androgynous "Prism", 414 curated clips, ref 10.8s)
+- Dakota — slot 3001 (VoiceDesign, male "Trail Guide", 374 curated clips, ref 10.2s)
+- Nora — slot 3002 (VoiceDesign, female, 394 curated clips, ref 7.5s)
+- Joe — slot 3003 (VoiceDesign, male, 367 curated clips, ref 7.3s)
+- Oliver — slot 3004 (VoiceDesign, male British RP, 360 curated clips, ref 11.3s)
+- Tessa — slot 3005 (VoiceDesign, female Australian, 331 curated clips, ref 10.4s)
 
-The remaining 27 voices will be assigned slots 3003-3029 during training. Katie may be renamed to one of these if she fits a character.
+The remaining 24 voices will be assigned slots 3006-3029 during training.
 
 ## Design Process
 
