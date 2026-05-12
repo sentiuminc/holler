@@ -9,7 +9,7 @@ struct HollerCLI {
 
         var text: String?
         var voice = "kit"
-        var model = "sentium/holler-0.6b-6bit"
+        var model = "sentium/holler-tts-0.6b-6bit"
         var output = "output.wav"
         var codebooks = 12
         var temperature: Float = 0.6
@@ -311,7 +311,7 @@ struct HollerCLI {
           --session                   LLM streaming simulation (token-by-token feed)
           --benchmark                 Run 6-sentence streaming benchmark
           --voice, -v <name>          Voice name (default: kit)
-          --model, -m <path-or-repo>  Model path or HF repo (default: sentium/holler-0.6b-6bit)
+          --model, -m <path-or-repo>  Model path or HF repo (default: sentium/holler-tts-0.6b-6bit)
           --output, -o <path>         Output WAV path (default: output.wav)
           --codebooks <int>           Number of codebooks 1-16 (default: 12)
           --temperature <float>       Sampling temperature (default: 0.6)

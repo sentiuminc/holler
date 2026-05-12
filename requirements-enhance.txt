@@ -1,0 +1,10 @@
+# Enhancement & analysis venv (Python 3.13, NOT 3.14)
+# Create: python3.13 -m venv .venv-enhance-audio
+# Install: .venv-enhance-audio/bin/pip install -r requirements-enhance.txt
+#
+# Note: "parselmouth" on PyPI is a DIFFERENT package (Google Ads related).
+# The correct one is "praat-parselmouth".
+numpy==2.4.4
+praat-parselmouth==0.4.7
+scipy==1.17.1
+soundfile==0.13.1

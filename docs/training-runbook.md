@@ -13,7 +13,7 @@ Authoritative doc for training Qwen3-TTS 0.6B custom voices. Covers single-voice
 **Loss:** 12-15 at lr=1e-7, 12-14 at lr=5e-7. Low loss at higher LR = overfitting, not quality.
 **Cosine scheduler (FIXED 2026-05-11):** `total_optimizer_steps = (steps_per_epoch × num_epochs) // grad_accum`. The Accelerator steps the scheduler once per optimizer step (every `grad_accum` batches). Without this fix, the scheduler sees raw batch count and only completes ~25% of its cosine curve — lr barely decays.
 **Embedding normalization (added 2026-05-11):** L2-normalize all ECAPA-TDNN speaker embeddings to magnitude 10.0 before injection. Strips loudness from embeddings while preserving voice identity. Without this, voices with higher embedding norms produce hotter output, and LUFS changes cascade unpredictably through shared weights.
-**LUFS:** All voices at **uniform -22 LUFS** (refs and clips). Do NOT use per-voice LUFS adjustments — they cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Tested extensively 2026-05-11 across 12 training runs.
+**LUFS:** All voices at **-22 LUFS** (refs and clips), except **Nora at -24 LUFS**. Nora's voice direction in embedding space encodes "loud" through the transformer — even with embedding normalization she outputs 3-4 dB hotter than others at -22 LUFS. Training her 2 dB quieter brings output within 1-2 dB of the pack. General rule: do NOT use per-voice LUFS adjustments unless a voice consistently runs hot after testing — they cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Nora is the exception, validated across v13/v14 (2026-05-12).
 **Inference temperature:** 0.7 (not 0.6). Training data was generated at 0.85 — inference at 0.6 flattens prosody. 0.7 is the sweet spot.
 
 ### Single-Voice
@@ -107,13 +107,13 @@ Refine → narrow → pick winner → optionally clone through 1.7B-Base-bf16 fo
 
 Clean the reference with DeepFilterNet3 only (single pass) + LUFS normalize to match training clip LUFS. **Do NOT cascade enhancers** (ClearVoice + DeepFilter + noisereduce was proven harmful — adds noise to silence, doubles sibilance). Use `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` (full precision) for cloning.
 
-**⚠️ CRITICAL: All voices at uniform LUFS.** The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Per-voice LUFS adjustments cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Tested extensively 2026-05-11: changing one voice's LUFS by 3 dB shifted other voices' output by up to 5+ dB.
+**⚠️ CRITICAL: All voices at -22 LUFS, Nora at -24 LUFS.** The ECAPA-TDNN speaker encoder bakes loudness into the embedding. Per-voice LUFS adjustments generally cause unpredictable cross-voice interference through shared transformer weights ("whack-a-mole"). Exception: Nora runs 3-4 dB hot even with embedding normalization — training at -24 LUFS (2 dB below others) + inference-side normalization brings her in line. Validated on v13/v14.
 
 **⚠️ Use embedding normalization.** L2-normalize speaker embeddings to magnitude 10.0 before injection during training. This strips the loudness signal from embeddings while preserving voice identity. Without it, some voices (e.g., Nora) consistently produce output 5-9 dB hotter than training data regardless of LUFS adjustments.
 
 **⚠️ Ref audio length matters.** Longer refs (7-11s) produce more stable voice identity at inference. Short refs (4-5s) give the ECAPA-TDNN less context → vaguer embedding → variable voice across generations. Use the longest good clip available.
 
-**Current LUFS target: -22** (was -20, changed 2026-05-11). All voices at the same level. Both refs and training clips must match.
+**Current LUFS target: -22** (was -20, changed 2026-05-11). All voices at the same level except Nora at -24. Both refs and training clips must match.
 
 ```bash
 # Quick check — all refs should be close to -20 RMS
@@ -410,6 +410,24 @@ convert(hf_path='<bf16_path>', mlx_path='<output_path>', quantize=True, q_bits=6
 | mxfp8 | 1210M | 11.2 | Worse than 6-bit despite more bits |
 
 Codec_embedding and speaker embedding layers stay bf16 automatically (converter keeps small/critical layers full precision).
+
+## Inference Audio Pipeline (2026-05-12)
+
+The codec decoder's original `clip(wav, -1, 1)` caused hard clipping distortion on hot voices (raw output exceeds 1.0 by up to 40%). This was the root cause of pops/crackles, not chunk boundaries or quantization artifacts.
+
+**Pipeline (applied in order):**
+1. **Decoder dynamic peak normalization** (`mlx-audio-swift 0.31.3-holler.4`): Per-chunk `scale = min(0.9 / peak, 1.0)`. If a chunk's peak exceeds 0.9, scale the entire chunk down proportionally. Quiet chunks pass through unchanged (scale capped at 1.0, never boosts). Preserves waveform shape.
+2. **Streaming AGC** (`StreamingPipeline.swift`): Per-chunk RMS-based gain targeting -20 LUFS. Smoothing coefficient 0.3 (30% new gain, 70% previous). Hard peak ceiling at 0.9 post-gain prevents overshooting. Equalizes loudness across all voices to within ~1.2 dB.
+
+**What was removed:**
+- Tanh soft clip (knee=0.8) — redundant with decoder normalization, was compressing the top 10% of signal unnecessarily.
+- Per-voice gain (`voiceGain`) — superseded by AGC which handles all voices dynamically.
+
+**Root cause investigation (2026-05-12):**
+- Pops are NOT single-sample anomalies — they're sustained harmonic distortion during loud voiced speech.
+- Pops are NOT at streaming chunk boundaries (verified: boundary correlation = random chance).
+- Pops exist in bf16 too — not a quantization artifact.
+- The decoder hard clip was part of the problem but not all — the model itself produces distorted waveforms when driven hard. Training Nora at -24 LUFS reduces how often the model gets driven that hard.
 
 ## Technical Details
 

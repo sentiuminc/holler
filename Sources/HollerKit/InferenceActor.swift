@@ -144,7 +144,7 @@ actor InferenceActor {
             topK: config.topK
         )
 
-        var pipeline = StreamingPipeline(config: config, sampleRate: sampleRate, isCarryover: !resetDecoder)
+        var pipeline = StreamingPipeline(config: config, sampleRate: sampleRate, isCarryover: !resetDecoder, voice: voice)
         let log = config.log
 
         let stream = model.generateStream(

@@ -20,8 +20,9 @@ public struct HollerConfiguration: Sendable {
     public var carryoverPauseMinMs: Int = 150
     public var carryoverPauseMaxMs: Int = 250
 
-    // Soft limiter — prevents hard clipping on hot model output
-    public var softClipKnee: Float = 0.8
+    // Target LUFS for output normalization. RMS-based streaming AGC.
+    // -20 LUFS ≈ podcast/Siri level. Set to nil to disable.
+    public var targetLUFS: Float? = -20.0
 
     // Debug logging — set to a closure to enable verbose output.
     // Library never calls print() directly; all debug output goes through this.

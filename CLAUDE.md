@@ -18,17 +18,17 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-05-11)
+## Current State (2026-05-12)
 
-- **Recipe:** lr=5e-7, cosine warmup (scheduler fix: `total_steps ÷ grad_accum`), 2 epochs, batch_size=2, grad_accum=4, weight_decay=0.01, **embedding normalization** (L2-norm to 10.0). All training data at uniform -22 LUFS.
-- **6-voice v12 (CURRENT):** `checkpoints/holler-6voice-v12-6bit/` and `holler-6voice-v12-bf16/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Benchmark: 90% clean raw at temp 0.7, every voice 9/10. bf16 sounds significantly better than 6-bit. Also on R2 at `r2:holler/checkpoints/holler-6voice-v12-e1/`.
-- **v5 (backup):** `checkpoints/holler-6voice-v5-6bit/` and `v5-bf16/`. Previous best before embedding normalization. On R2 at `r2:holler/checkpoints/holler-6voice-v5-e1/`.
-- **Training data on R2:** `r2:holler/training-data/` — all 6 voices at **uniform -22 LUFS** (clips + refs). Original long VoiceDesign refs (7-11s). rclone remote `r2-sentium` configured locally.
+- **Recipe:** lr=5e-7, cosine warmup (scheduler fix: `total_steps ÷ grad_accum`), 2 epochs, batch_size=2, grad_accum=4, weight_decay=0.01, **embedding normalization** (L2-norm to 10.0). All training data at uniform -22 LUFS except Nora at -24 LUFS.
+- **6-voice v14 (CURRENT):** `checkpoints/holler-tts-0.6b-6bit/` and `holler-tts-0.6b-bf16/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Benchmark: 93% clean raw at temp 0.7, Nora 10/10 perfect. All voices within 1.2 dB LUFS of each other. Also on R2 at `r2:holler/checkpoints/holler-tts-0.6b-bf16/`.
+- **v12 (previous):** 90% clean benchmark. Nora ran 3-4 dB hot. Hard clip distortion at decoder output. On R2 at `r2:holler/checkpoints/holler-6voice-v12-e1/`.
+- **Training data on R2:** `r2:holler/training-data/` — all 6 voices at **-22 LUFS** (clips + refs), plus Nora at **-24 LUFS** (`audio-24lufs/` + `ref-24lufs.wav`). rclone remote `r2-sentium` configured locally.
 - **R2 instance cache:** `r2:holler/instance-cache/` — pip-cache.tar.gz + models-cache.tar.gz. Setup time ~5-8 min.
-- **Quantization:** 6-bit affine g64 for shipping. bf16 for quality. 8-bit untested but promising middle ground. **Must copy entire `speech_tokenizer/` directory** (all config files + model.safetensors) after quantization — reuse canonical copy, never re-download.
-- **Inference:** Temperature 0.7 (not 0.6) for better prosody. Soft clip knee 0.8.
+- **Quantization:** 6-bit affine g64 for shipping. bf16 for best quality. **Must copy entire `speech_tokenizer/` directory** after quantization — reuse canonical copy, never re-download.
+- **Inference:** Temperature 0.7. Dynamic peak normalization at decoder (0.9 target). Streaming AGC targeting -20 LUFS. No soft clip, no per-voice gain.
 - **Benchmark tool:** `tools/benchmark_quality.py` — Whisper medium word timestamps, gap analysis, strict WER. `--raw` and `--session` modes, `--temperature` flag, `--compare` for A/B.
-- **Python venv:** `.venv` (Python 3.14, mlx-audio, mlx-whisper) and `.venv-enhance-audio` (Python 3.13, torch 2.6, parselmouth, DNSMOS, pyloudnorm).
+- **Python venv:** `.venv` (Python 3.14, mlx-audio, mlx-whisper) and `.venv-enhance-audio` (Python 3.13, praat-parselmouth, scipy — see `requirements-enhance.txt`).
 
 ## Structure
 
@@ -118,7 +118,7 @@ holler/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Run server (auto-downloads sentium/holler-0.6b-6bit from HuggingFace on first run)
+# 2. Run server (auto-downloads sentium/holler-tts-0.6b-6bit from HuggingFace on first run)
 python3 inference/server.py
 python3 inference/server.py -c path/to/local/checkpoint --voice kit
 # → http://localhost:8100
@@ -174,7 +174,7 @@ mlx-audio's `model.generate(stream=True, streaming_interval=0.1)` gives RTF ~0.7
 
 ## HollerKit (Swift Package) — Phase 2B Complete
 
-Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiuminc/mlx-audio-swift` (git URL, tag `0.31.3-holler.3`).
+Native Swift TTS library at repo root (`Sources/HollerKit/`). Depends on `sentiuminc/mlx-audio-swift` (git URL, tag `0.31.3-holler.4`).
 
 **Build & Run:**
 ```bash
@@ -245,7 +245,12 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 - Temperature 0.7 at inference gives better prosody than 0.6 (training data was generated at 0.85)
 - bf16 sounds significantly better than 6-bit — 8-bit quantization untested but promising
 
-**Nora runs ~3 dB hotter than training data** even with embedding normalization. Her voice identity inherently encodes "loud" in the ECAPA-TDNN. Manageable with soft clipping at inference.
+**Nora runs ~1-2 dB hotter than other voices** even with embedding normalization. Her voice direction in embedding space encodes "loud" through 28 transformer layers — not fixable by training data LUFS alone (tested extensively). Training at -24 LUFS (2 dB below others) + decoder dynamic peak normalization + streaming AGC brings her within 1.2 dB of all other voices.
+
+**Audio post-processing pipeline (v14):**
+1. **Decoder dynamic peak normalization** (in mlx-audio-swift `0.31.3-holler.4`): replaces hard `clip(wav, -1, 1)` with per-chunk scaling to 0.9 peak. Preserves waveform shape, eliminates clipping distortion. The decoder raw output can exceed 1.0 by up to 40% on hot voices.
+2. **Streaming AGC** (in `StreamingPipeline.swift`): per-chunk RMS-based gain targeting -20 LUFS with 0.3 smoothing coefficient + hard peak ceiling at 0.9. Equalizes loudness across all voices.
+3. No soft clip, no per-voice gain — both removed, superseded by the above.
 
 **Key numbers:**
 - bf16: RTF 0.67-0.81, 2378MB Metal RAM — real-time, best quality
@@ -275,8 +280,8 @@ Quick reference tools:
 
 ## HuggingFace Release Target
 
-- `sentium/holler-0.6b` (bf16 — full precision, source for custom quantization)
-- `sentium/holler-0.6b-6bit` (affine 6-bit g64 — the pick, best quality-to-size ratio)
+- `sentium/holler-tts-0.6b` (bf16 — full precision, source for custom quantization)
+- `sentium/holler-tts-0.6b-6bit` (affine 6-bit g64 — the pick, best quality-to-size ratio)
 
 ## Hard-Won Lessons
 
@@ -292,22 +297,21 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ## What's NOT Known / Unresolved
 
-- Whether 8-bit quantization is a viable middle ground (better quality than 6-bit, smaller than bf16)
 - Whether joint training at 30 voices holds up (tested at 2 and 6)
 - Whether trimming leading silence from training data reduces the 220ms codec warmup
 - EOS failure ~2-4% of the time (model-level) — mitigated by safety cap but not eliminated
-- Why Nora consistently runs ~3 dB hot even with embedding normalization — may be inherent to her voice identity
+- 4-bit quantization — untested on v14, could be viable for size-constrained use cases
 
 ## What's Next
 
-### Immediate
+### Done
 
 1. ~~**Cosine scheduler fix**~~ — ✅ DONE (v2). `total_steps ÷ grad_accum`.
 2. ~~**Embedding normalization**~~ — ✅ DONE (v11). L2-norm to 10.0.
 3. ~~**Proper benchmark tool**~~ — ✅ DONE. `tools/benchmark_quality.py` with Whisper word timestamps.
-4. ~~**Release-quality 6-voice model**~~ — ✅ DONE. v12 checkpoint.
-5. **Test 8-bit quantization** on v12 — could be the sweet spot between 6-bit speed and bf16 quality.
-6. **Generate more Tessa training data** — 331 clips is the fewest. 500+ would improve consistency.
+4. ~~**Release-quality 6-voice model**~~ — ✅ DONE. v14 checkpoint. 93% clean, all voices balanced.
+5. ~~**Fix audio popping/clipping**~~ — ✅ DONE. Decoder dynamic peak normalization + streaming AGC. No more pops.
+6. ~~**Nora loudness fix**~~ — ✅ DONE. Training at -24 LUFS + decoder normalization. Output within 1.2 dB of other voices.
 
 ### HollerKit (Swift)
 
@@ -320,8 +324,9 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 10. **Pick remaining voices** — from roster in `voices/VOICES.md`. Generate training data, enhance, curate for each.
 11. **Scale to 10+ voices** — embedding normalization should help maintain voice separation at scale.
 12. **Explore MLX training** — eliminates GPU rental. mlx-audio has the model; adding `nn.value_and_grad()` could be a 1-day project.
+13. **Test 4-bit quantization** on v14 — could work for size-constrained use cases.
 
 ### Release
 
-13. **HuggingFace release** under `sentium/` — bf16 + 6-bit (+ 8-bit if it tests well).
-14. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.
+14. **HuggingFace release** under `sentium/` — bf16 + 6-bit.
+15. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.

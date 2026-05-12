@@ -13,6 +13,11 @@ struct StreamingPipeline {
     private let sampleRate: Int
     private let silentAbortChunks: Int
 
+    // Streaming AGC state
+    private let targetRMS: Float?
+    private var smoothedGain: Float = 1.0
+    private let gainSmoothing: Float = 0.3
+
     private var speechStarted: Bool
     private var needsPause: Bool
     private var silentChunkCount = 0
@@ -20,12 +25,16 @@ struct StreamingPipeline {
     private(set) var aborted = false
     private(set) var totalSamplesYielded = 0
 
-    init(config: HollerConfiguration, sampleRate: Int = 24000, isCarryover: Bool = false) {
+    init(config: HollerConfiguration, sampleRate: Int = 24000, isCarryover: Bool = false, voice: String = "") {
         self.config = config
         self.sampleRate = sampleRate
         self.speechStarted = isCarryover
         self.needsPause = isCarryover
-        // silentAbortTokens is in codec tokens; each chunk is streamingChunkTokens tokens
+        if let lufs = config.targetLUFS {
+            self.targetRMS = pow(10.0, (lufs + 0.691) / 20.0)
+        } else {
+            self.targetRMS = nil
+        }
         self.silentAbortChunks = max(1, config.silentAbortTokens / config.streamingChunkTokens)
     }
 
@@ -40,23 +49,31 @@ struct StreamingPipeline {
             chunks = handlePostSpeech(samples)
         }
 
-        return chunks.map { softClip($0) }
+        guard targetRMS != nil else { return chunks }
+        return chunks.map { normalizeChunk($0) }
     }
 
-    /// Soft-clip a chunk: samples below knee pass through unchanged,
-    /// samples above knee get smoothly compressed toward 1.0 via tanh.
-    private func softClip(_ samples: [Float]) -> [Float] {
-        let knee = config.softClipKnee
-        let headroom = 1.0 - knee
-        guard headroom > 0 else { return samples }
+    private mutating func normalizeChunk(_ samples: [Float]) -> [Float] {
+        guard let target = targetRMS else { return samples }
 
-        return samples.map { sample in
-            let magnitude = abs(sample)
-            guard magnitude > knee else { return sample }
-            let sign: Float = sample >= 0 ? 1 : -1
-            let compressed = knee + headroom * tanh((magnitude - knee) / headroom)
-            return sign * compressed
+        let sumSq = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        let rms = sqrt(sumSq / max(Float(samples.count), 1))
+
+        guard rms > 0.001 else { return samples }
+
+        let desiredGain = target / rms
+        let clampedGain = min(desiredGain, 4.0)
+        smoothedGain = gainSmoothing * clampedGain + (1.0 - gainSmoothing) * smoothedGain
+
+        // Apply gain then enforce peak ceiling at 0.9
+        var result = samples.map { $0 * smoothedGain }
+        let resultPeak = result.map { abs($0) }.max() ?? 0
+        if resultPeak > 0.9 {
+            let scale = 0.9 / resultPeak
+            result = result.map { $0 * scale }
+            smoothedGain *= scale
         }
+        return result
     }
 
     // MARK: - Pre-speech: waiting for first speech chunk
