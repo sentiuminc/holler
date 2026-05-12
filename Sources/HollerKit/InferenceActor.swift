@@ -19,18 +19,10 @@ actor InferenceActor {
 
     func loadModel(repo: String) async throws {
         let localURL = URL(fileURLWithPath: repo).standardizedFileURL
-        let isLocal = FileManager.default.fileExists(atPath: localURL.path)
-
-        let qwen3: Qwen3TTSModel
-        if isLocal {
-            qwen3 = try await Qwen3TTSModel.fromModelDirectory(localURL)
-        } else {
-            let loaded = try await TTS.loadModel(modelRepo: repo)
-            guard let q = loaded as? Qwen3TTSModel else {
-                throw HollerError.generationFailed("Model is not Qwen3-TTS")
-            }
-            qwen3 = q
+        guard FileManager.default.fileExists(atPath: localURL.path) else {
+            throw HollerError.generationFailed("Model not found at \(localURL.path)")
         }
+        let qwen3 = try await Qwen3TTSModel.fromModelDirectory(localURL)
         model = qwen3
         sampleRate = qwen3.sampleRate
         voices = Self.extractVoices(repo: repo)
