@@ -11,7 +11,7 @@ public final class HollerModel: @unchecked Sendable {
 
     /// Load a Holler model from a HuggingFace repo or local directory path.
     public static func load(
-        repo: String = "sentium/holler-0.6b-6bit",
+        repo: String = "sentiuminc/holler-0.6b-6bit",
         configuration: HollerConfiguration = HollerConfiguration()
     ) async throws -> HollerModel {
         let actor = InferenceActor()

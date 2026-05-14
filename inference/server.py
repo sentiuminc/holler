@@ -31,23 +31,27 @@ import mlx.core as mx
 from mlx_audio.tts import load
 from mlx_lm.sample_utils import categorical_sampling
 
-DEFAULT_CHECKPOINT = "sentium/holler-0.6b-6bit"
+DEFAULT_CHECKPOINT = "sentiuminc/holler-0.6b"
 DEFAULT_PORT = 8100
 CHECKPOINT = DEFAULT_CHECKPOINT
 PORT = DEFAULT_PORT
 SAMPLE_RATE = 24000
 DEFAULT_VOICE = "kit"
-DEFAULT_TEMP = 0.6
+DEFAULT_TEMP = 0.7
 DEFAULT_TOP_K = 50
 MAX_TOKENS = 500
 FIRST_CHUNK_TOKENS = 3
 STREAM_CHUNK_TOKENS = 3
 SILENT_ABORT_TOKENS = 16
-DEFAULT_CODEBOOKS = 12
+DEFAULT_CODEBOOKS = 16
 SPEECH_THRESHOLD_RMS = 0.01
 CARRYOVER_PAUSE_MIN_MS = 150
 CARRYOVER_PAUSE_MAX_MS = 250
 SERVE_UI = True
+AGC_TARGET_LUFS = -20.0
+AGC_SMOOTHING = 0.3
+AGC_MAX_GAIN = 4.0
+AGC_PEAK_CEILING = 0.9
 
 # TODO: Dynamic de-esser for 2-6kHz ear fatigue reduction.
 # Static EQ (-5dB notch at 3kHz) was tested and works but is too crude —
@@ -205,6 +209,46 @@ def _apply_trailing_fadeout(chunk, fade_ms=20):
     chunk = chunk.copy()
     chunk[-fade_samples:] *= np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
     return chunk
+
+
+def _normalize_peak(chunk, ceiling=AGC_PEAK_CEILING):
+    """Scale chunk so peak doesn't exceed ceiling. Preserves waveform shape."""
+    peak = np.max(np.abs(chunk))
+    if peak > ceiling:
+        chunk = chunk * (ceiling / peak)
+    return chunk
+
+
+class StreamingAGC:
+    """RMS-based automatic gain control targeting a LUFS level.
+
+    Port of StreamingPipeline.normalizeChunk() from Swift HollerKit.
+    Smooths gain across chunks for stable loudness. Peak ceiling prevents clipping.
+    """
+    def __init__(self, target_lufs=AGC_TARGET_LUFS, smoothing=AGC_SMOOTHING,
+                 max_gain=AGC_MAX_GAIN, peak_ceiling=AGC_PEAK_CEILING):
+        self.target_rms = 10.0 ** ((target_lufs + 0.691) / 20.0)
+        self.smoothing = smoothing
+        self.max_gain = max_gain
+        self.peak_ceiling = peak_ceiling
+        self.smoothed_gain = 1.0
+
+    def process(self, chunk):
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+        if rms < 0.001:
+            return chunk
+
+        desired_gain = self.target_rms / rms
+        clamped_gain = min(desired_gain, self.max_gain)
+        self.smoothed_gain = self.smoothing * clamped_gain + (1.0 - self.smoothing) * self.smoothed_gain
+
+        result = chunk * self.smoothed_gain
+        peak = np.max(np.abs(result))
+        if peak > self.peak_ceiling:
+            scale = self.peak_ceiling / peak
+            result = result * scale
+            self.smoothed_gain *= scale
+        return result
 
 
 def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
@@ -414,7 +458,7 @@ def _run_generation(mdl, text, voice, language, temperature, top_k, max_tokens,
 
 _carry_over_state = {}
 
-def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
+def generate_audio(mdl, text, voice=None, language="english", temperature=0.7,
                    top_k=50, max_tokens=500, n_codebooks=DEFAULT_CODEBOOKS,
                    reset_decoder=True):
     """Generate speech, yielding float32 audio chunks.
@@ -433,6 +477,8 @@ def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
     cache_out = _carry_over_state if not reset_decoder else {}
     if reset_decoder:
         _carry_over_state = {}
+
+    agc = StreamingAGC()
 
     retry_temps = [temperature, min(temperature + 0.1, 1.0), min(temperature + 0.2, 1.0), min(temperature + 0.3, 1.0)]
     attempts = [
@@ -468,6 +514,8 @@ def generate_audio(mdl, text, voice=None, language="english", temperature=0.6,
             if len(chunk) > 0:
                 got_speech = True
                 total_samples += len(chunk)
+                chunk = _normalize_peak(chunk)
+                chunk = agc.process(chunk)
                 yield chunk
 
         if got_speech and total_samples >= min_audio_samples:
@@ -758,7 +806,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Holler TTS Server")
     parser.add_argument("--checkpoint", "-c", default=DEFAULT_CHECKPOINT,
-                        help="Local path or HuggingFace repo (default: sentium/holler-0.6b-6bit)")
+                        help="Local path or HuggingFace repo (default: sentiuminc/holler-0.6b)")
     parser.add_argument("--port", "-p", type=int, default=DEFAULT_PORT,
                         help="Server port (default: 8100)")
     parser.add_argument("--voice", "-v", default=None,

@@ -9,10 +9,8 @@
   "clip_0008.wav": "keep",
   "clip_0009.wav": "reject",
   "clip_0010.wav": "keep",
-  "clip_0011.wav": "keep",
   "clip_0012.wav": "keep",
   "clip_0013.wav": "keep",
-  "clip_0014.wav": "keep",
   "clip_0015.wav": "keep",
   "clip_0016.wav": "keep",
   "clip_0017.wav": "reject",
@@ -498,5 +496,6 @@
   "clip_0497.wav": "keep",
   "clip_0498.wav": "reject",
   "clip_0499.wav": "keep",
-  "clip_0500.wav": "keep"
+  "clip_0500.wav": "keep",
+  "clip_0011.wav": "keep"
 }

@@ -1,7 +1,7 @@
 public struct HollerConfiguration: Sendable {
-    public var temperature: Float = 0.6
+    public var temperature: Float = 0.7
     public var topK: Int = 50
-    public var codebooks: Int = 12
+    public var codebooks: Int = 16
     public var maxTokens: Int = 500
 
     public var streamingChunkTokens: Int = 3

@@ -2,7 +2,7 @@
 
 Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
-**What this is:** A fine-tuned Qwen3-TTS-12Hz-0.6B model with 30 high-quality American English voices, optimized for local inference on Apple Silicon via mlx-audio. ~139ms TTFA streaming, ~1.7GB RAM at 6-bit. The fastest high-quality local TTS available on Mac.
+**What this is:** A fine-tuned Qwen3-TTS-12Hz-0.6B model with 6 American English voices, optimized for local inference on Apple Silicon via mlx-audio. ~147-200ms TTFA streaming (depending on variant), ~1.7-2.4GB RAM. Published on HuggingFace as `sentiuminc/holler-0.6b` (bf16) and `sentiuminc/holler-0.6b-6bit`.
 
 **What this is not:** A new TTS architecture. This is a fine-tune of Alibaba's [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache 2.0) with better English voices and a fully open training pipeline. All credit for the base model goes to the Qwen team at Alibaba. Our contribution is the voices, the Mac-focused inference setup, and the open training pipeline.
 
@@ -18,7 +18,7 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 
 **Session logs:** All holler session logs go in the parent ivi repo at `ivi/logs/`, not in `holler/logs/`. Old session logs have been moved there already. `holler/logs/runs/` still holds raw training/inference output logs.
 
-## Current State (2026-05-12)
+## Current State (2026-05-14)
 
 - **Recipe:** lr=5e-7, cosine warmup (scheduler fix: `total_steps ÷ grad_accum`), 2 epochs, batch_size=2, grad_accum=4, weight_decay=0.01, **embedding normalization** (L2-norm to 10.0). All training data at uniform -22 LUFS except Nora at -24 LUFS.
 - **6-voice v14 (CURRENT):** `checkpoints/holler-tts-0.6b-6bit/` and `holler-tts-0.6b-bf16/`. Kit=3000, Dakota=3001, Nora=3002, Joe=3003, Oliver=3004, Tessa=3005. Benchmark: 93% clean raw at temp 0.7, Nora 10/10 perfect. All voices within 1.2 dB LUFS of each other. Also on R2 at `r2:holler/checkpoints/holler-tts-0.6b-bf16/`.
@@ -26,7 +26,8 @@ Open-source American English voice pack for Qwen3-TTS 0.6B. By Sentium.
 - **Training data on R2:** `r2:holler/training-data/` — all 6 voices at **-22 LUFS** (clips + refs), plus Nora at **-24 LUFS** (`audio-24lufs/` + `ref-24lufs.wav`). rclone remote `r2-sentium` configured locally.
 - **R2 instance cache:** `r2:holler/instance-cache/` — pip-cache.tar.gz + models-cache.tar.gz. Setup time ~5-8 min.
 - **Quantization:** 6-bit affine g64 for shipping. bf16 for best quality. **Must copy entire `speech_tokenizer/` directory** after quantization — reuse canonical copy, never re-download.
-- **Inference:** Temperature 0.7. Dynamic peak normalization at decoder (0.9 target). Streaming AGC targeting -20 LUFS. No soft clip, no per-voice gain.
+- **Inference:** Temperature 0.7 (default everywhere — code, CLI, server, generation_config.json). Codebooks 16 default (12 for fast streaming). Dynamic peak normalization at decoder (0.9 target). Streaming AGC targeting -20 LUFS in both Swift and Python. No soft clip, no per-voice gain.
+- **HuggingFace:** LIVE at [`sentiuminc/holler-0.6b`](https://huggingface.co/sentiuminc/holler-0.6b) and [`sentiuminc/holler-0.6b-6bit`](https://huggingface.co/sentiuminc/holler-0.6b-6bit). Model cards with audio samples. `base_model_relation: quantized` links them.
 - **Benchmark tool:** `tools/benchmark_quality.py` — Whisper medium word timestamps, gap analysis, strict WER. `--raw` and `--session` modes, `--temperature` flag, `--compare` for A/B.
 - **Python venv:** `.venv` (Python 3.14, mlx-audio, mlx-whisper) and `.venv-enhance-audio` (Python 3.13, praat-parselmouth, scipy — see `requirements-enhance.txt`).
 
@@ -118,7 +119,7 @@ holler/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Run server (auto-downloads sentium/holler-tts-0.6b-6bit from HuggingFace on first run)
+# 2. Run server (auto-downloads sentiuminc/holler-0.6b from HuggingFace on first run)
 python3 inference/server.py
 python3 inference/server.py -c path/to/local/checkpoint --voice kit
 # → http://localhost:8100
@@ -252,10 +253,23 @@ Our training data also has 25-212ms of leading silence per clip, which reinforce
 2. **Streaming AGC** (in `StreamingPipeline.swift`): per-chunk RMS-based gain targeting -20 LUFS with 0.3 smoothing coefficient + hard peak ceiling at 0.9. Equalizes loudness across all voices.
 3. No soft clip, no per-voice gain — both removed, superseded by the above.
 
-**Key numbers:**
-- bf16: RTF 0.67-0.81, 2378MB Metal RAM — real-time, best quality
-- 6-bit: RTF 0.50-0.57, 1744MB Metal RAM — fast, good quality
-- Size: bf16 2.3GB, 6-bit 1.7GB on disk
+**Key numbers:** See README.md performance table. Defaults: bf16/16cb (best quality), temperature 0.7 everywhere.
+
+**Running the full performance benchmark across all 3 variants:**
+```bash
+BF16=checkpoints/holler-tts-0.6b-bf16
+SIXBIT=checkpoints/holler-tts-0.6b-6bit
+
+# Quick benchmark (6 short sentences, built-in)
+./holler -m $BF16 --codebooks 16 --benchmark
+./holler -m $SIXBIT --codebooks 16 --benchmark
+./holler -m $SIXBIT --codebooks 12 --benchmark
+
+# Paragraph benchmark (more representative — use 10+ multi-sentence texts in --session mode)
+./holler -m $BF16 --codebooks 16 --session -t "Your paragraph here. Multiple sentences. Like a real assistant response." -o /dev/null
+# Output: [holler] Xs audio, N chunks, TTFA=Xms, Total=Xms
+# RTF = Total / Audio for each run. Use medians over 10+ runs.
+```
 
 ## Voice Data Pipeline & Training
 
@@ -278,10 +292,10 @@ Quick reference tools:
 - **rekuenkdr** — anonymous hobbyist, posted the winning lr=1e-7 recipe (Issue #39), built the two-phase streaming fork (72 stars). Also works on "OVA" (local voice assistant pipeline).
 - **Our GitHub comment** documenting findings: https://github.com/QwenLM/Qwen3-TTS/issues/39#issuecomment-4289306999
 
-## HuggingFace Release Target
+## HuggingFace
 
-- `sentium/holler-tts-0.6b` (bf16 — full precision, source for custom quantization)
-- `sentium/holler-tts-0.6b-6bit` (affine 6-bit g64 — the pick, best quality-to-size ratio)
+- [`sentiuminc/holler-0.6b`](https://huggingface.co/sentiuminc/holler-0.6b) (bf16 — full precision, default, best quality)
+- [`sentiuminc/holler-0.6b-6bit`](https://huggingface.co/sentiuminc/holler-0.6b-6bit) (affine 6-bit g64 — fast streaming variant)
 
 ## Hard-Won Lessons
 
@@ -328,5 +342,5 @@ Training lessons are in `docs/training-runbook.md`. Inference lessons below (see
 
 ### Release
 
-14. **HuggingFace release** under `sentium/` — bf16 + 6-bit.
+14. ~~**HuggingFace release**~~ — ✅ DONE. `sentiuminc/holler-0.6b` (bf16) + `sentiuminc/holler-0.6b-6bit`.
 15. **PR to mlx-audio** — reduce `mx.clear_cache()` frequency in their streaming loop.

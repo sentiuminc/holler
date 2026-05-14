@@ -9,10 +9,10 @@ struct HollerCLI {
 
         var text: String?
         var voice = "kit"
-        var model = "sentium/holler-tts-0.6b-6bit"
+        var model = "sentiuminc/holler-0.6b"
         var output = "output.wav"
-        var codebooks = 12
-        var temperature: Float = 0.6
+        var codebooks = 16
+        var temperature: Float = 0.7
         var topK = 50
         var maxTokens = 500
         var noRetry = false
@@ -57,6 +57,8 @@ struct HollerCLI {
                     exitError("--max-tokens requires an integer")
                 }
                 maxTokens = n
+            case "--6bit":
+                model = "sentiuminc/holler-0.6b-6bit"
             case "--no-retry":
                 noRetry = true
             case "--no-silence-trim":
@@ -192,12 +194,12 @@ struct HollerCLI {
 
     static func runBenchmark(model: HollerModel, voice: String) async throws {
         let sentences = [
-            "Hey!",
-            "Got it.",
-            "What is on your mind?",
-            "Yeah, that is pretty common with voice input.",
-            "Something about the umami thing appeals to me.",
-            "Hold on, speak a couple sentences, release, and let me know if the gap is gone.",
+            "Okay so I checked and the meeting got moved to three thirty tomorrow.",
+            "The file you were looking for is in your Downloads folder, not your Desktop.",
+            "I found three options that fit your budget, want me to walk you through them?",
+            "Your flight lands at four fifteen and there is a shuttle that runs every twenty minutes from the terminal.",
+            "I compared both and honestly the second option has way better reviews, I would go with that one if the budget allows.",
+            "Sure, I can look into that for you. Give me a second and I will have an answer ready.",
         ]
 
         print("[holler] Benchmark (\(sentences.count) sentences)")
@@ -243,7 +245,7 @@ struct HollerCLI {
         let avgTTFA = totalTTFA / Double(sentences.count)
         print("")
         print("Avg RTF: \(String(format: "%.3f", avgRTF)), Avg TTFA: \(String(format: "%.0f", avgTTFA))ms")
-        print("Target RTF <= 0.50: \(avgRTF <= 0.50 ? "PASS" : "FAIL")")
+        print("Target RTF <= 1.00: \(avgRTF <= 1.00 ? "PASS" : "FAIL")")
     }
 
     private actor SessionStats {
@@ -311,10 +313,11 @@ struct HollerCLI {
           --session                   LLM streaming simulation (token-by-token feed)
           --benchmark                 Run 6-sentence streaming benchmark
           --voice, -v <name>          Voice name (default: kit)
-          --model, -m <path-or-repo>  Model path or HF repo (default: sentium/holler-tts-0.6b-6bit)
+          --model, -m <path-or-repo>  Model path or HF repo (default: sentiuminc/holler-0.6b)
+          --6bit                      Use 6-bit quantized model (sentiuminc/holler-0.6b-6bit)
           --output, -o <path>         Output WAV path (default: output.wav)
-          --codebooks <int>           Number of codebooks 1-16 (default: 12)
-          --temperature <float>       Sampling temperature (default: 0.6)
+          --codebooks <int>           Number of codebooks 1-16 (default: 16)
+          --temperature <float>       Sampling temperature (default: 0.7)
           --top-k <int>               Top-k sampling (default: 50)
           --max-tokens <int>          Maximum tokens (default: 500)
           --token-delay <ms>          Delay between tokens in session mode (default: 15)

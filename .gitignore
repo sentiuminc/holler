@@ -8,7 +8,7 @@ samples/
 *.bin
 *.pt
 
-# Keep reference wavs and jsonl manifests tracked via git-lfs or explicit includes
+# Keep reference wavs and jsonl manifests tracked
 !voices/*/ref.wav
 
 # Python
