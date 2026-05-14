@@ -36,6 +36,7 @@ public final class SpeechSession: @unchecked Sendable {
 
     private var cacheState = Qwen3TTSModel.TalkerCacheState()
     private var isFirstSentence = true
+    private var finished = false
     /// Timestamp when the first sentence started generating.
     public private(set) var generationStartDate: Date?
 
@@ -70,7 +71,10 @@ public final class SpeechSession: @unchecked Sendable {
     /// Feed text tokens. Returns immediately — sentences are queued
     /// for generation in the background.
     public func feed(_ text: String) {
-        guard !cancelled else { return }
+        if finished {
+            config.log?("[session] feed after finish (dropped): \"\(text)\"")
+        }
+        guard !cancelled, !finished else { return }
 
         let sentences = sentenceBuffer.append(text)
         for sentence in sentences {
@@ -82,7 +86,8 @@ public final class SpeechSession: @unchecked Sendable {
     /// Signal that no more text will arrive. Flushes remaining
     /// buffered text and waits for all generation to complete.
     public func finish() async {
-        guard !cancelled else { return }
+        guard !cancelled, !finished else { return }
+        finished = true
 
         if let remaining = sentenceBuffer.flush() {
             config.log?("[session] flush remainder: \"\(remaining)\"")
