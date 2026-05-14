@@ -4,7 +4,7 @@ An open-source text to speech model with 6 American voices, and a highly perform
 
 Built for [ivi](https://ivi.computer), an ambient AI assistant for macOS. We open-sourced it because Qwen3-TTS is the best local TTS model available but ships with only 2 mediocre English voices.
 
-<!-- TODO: Intro video (Hyperframes) goes here -->
+<video src="holler-intro.mp4" autoplay muted loop playsinline width="100%"></video>
 
 > **[Listen to all voice samples on HuggingFace](https://huggingface.co/sentiuminc/holler-0.6b#voices)** | **[12 vs 16 codebook comparison](https://huggingface.co/sentiuminc/holler-0.6b-6bit#codebook-comparison)**
 
