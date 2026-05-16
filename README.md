@@ -1,6 +1,6 @@
 # Holler
 
-An open-source text to speech model with 6 American voices, and a highly performant inference engine for Apple Silicon. Finetuned from [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), and optimized for local AI assistant usecases. The inference server supports streaming text in and audio out, and has 140ms TTFA latency with an RTF of up to 2.1x depending on the configuration.
+An open-source text to speech model with 6 American voices, and a highly performant inference engine for Apple Silicon. Finetuned from [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), and optimized for local AI assistant usecases. The inference server supports streaming text in and audio out, and has 120ms TTFA latency with an RTF of up to 2.5x depending on the configuration.
 
 Built for [ivi](https://ivi.computer), an ambient AI assistant for macOS. We open-sourced it because Qwen3-TTS is the best local TTS model available but ships with only 2 mediocre English voices.
 
@@ -26,17 +26,27 @@ The weights are standard Qwen3-TTS checkpoints — you can load them with any co
 
 Codebooks are configurable at inference time (not baked into the model), so you can use also 16 codebooks with the 6-bit model or 12 with bf16 if you want.
 
-## Performance (M1 Pro, 16GB)
+## Performance
 
-Measured with HollerKit (Swift), `--session` mode, 10 multi-sentence paragraphs. Medians reported — individual generations vary depending on text length and codec warmup.
+Measured with HollerKit (Swift), `--benchmark` mode, 6 sentences. Medians reported — TTFA varies per generation due to codec warmup silence trimming.
+
+### M1 Pro (16GB)
 
 | Metric | bf16 / 16cb | 6-bit / 16cb | 6-bit / 12cb |
 |--------|-------------|--------------|--------------|
 | TTFA (median) | ~200ms | ~170ms | ~147ms |
 | Real-time factor | 0.68 | 0.54 | 0.47 |
 | Speed | 1.5x real-time | 1.8x real-time | 2.1x real-time |
-| Metal RAM | ~2.4 GB | ~1.7 GB | ~1.7 GB |
-| Download size | 2.3 GB | 1.7 GB | 1.7 GB |
+
+### M4 Air (16GB)
+
+| Metric | bf16 / 16cb | 6-bit / 16cb | 6-bit / 12cb |
+|--------|-------------|--------------|--------------|
+| TTFA (median) | ~198ms | ~134ms | ~119ms |
+| Real-time factor | 0.76 | 0.45 | 0.40 |
+| Speed | 1.3x real-time | 2.2x real-time | 2.5x real-time |
+
+Metal RAM: ~2.4 GB (bf16), ~1.7 GB (6-bit). Download: 2.3 GB / 1.7 GB.
 
 **About TTFA:** This is time to first *audible speech*, not time to first audio chunk. Qwen3-TTS (like most codec language models) produces 80-800ms of near-silence at the start of each generation. Holler detects and trims this automatically, so the TTFA reported here is when you actually hear the voice start speaking. Most TTS benchmarks and providers report time to first byte or first audio frame, which includes this silence. These numbers are what you actually experience.
 
