@@ -28,13 +28,19 @@ if ! command -v rclone &>/dev/null; then
   curl -sSL https://rclone.org/install.sh | bash
 fi
 
+if [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+  echo "ERROR: R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must be set"
+  echo "  export R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=..."
+  exit 1
+fi
+
 mkdir -p ~/.config/rclone
-cat > ~/.config/rclone/rclone.conf <<'CONF'
+cat > ~/.config/rclone/rclone.conf <<CONF
 [r2]
 type = s3
 provider = Cloudflare
-access_key_id = f68cf84e6c900eb1b454394e421ae10c
-secret_access_key = 71962ee2d2f4191352e5135114c014a1019d63b9b7fcea5c2ea0b4e070299438
+access_key_id = ${R2_ACCESS_KEY_ID}
+secret_access_key = ${R2_SECRET_ACCESS_KEY}
 endpoint = https://bc32378f7dcfe01a255b7a152f9c2319.r2.cloudflarestorage.com
 no_check_bucket = true
 CONF
